@@ -1,0 +1,12 @@
+requests
+polars
+pyarrow
+numpy
+scikit-learn
+xgboost
+matplotlib
+jupyter
+python-dotenv
+sqlalchemy
+psycopg[binary]
+click
