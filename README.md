@@ -183,9 +183,3 @@ python main.py --download 1 --process 1 --merge 1
 ## 🙏 Acknowledgements
 
 - [OpenF1](https://openf1.org) for the free and open Formula 1 data API.
-
-<div align="center">
-
-*Made with ☕ and a love for racing.*
-
-</div>
