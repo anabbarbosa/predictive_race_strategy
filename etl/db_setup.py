@@ -9,7 +9,6 @@ load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 def create_database():
     db = os.environ["PGDATABASE"]
-    # CREATE DATABASE não roda dentro de transação, por isso autocommit
     with psycopg.connect(
         host=os.environ["PGHOST"],
         port=os.environ["PGPORT"],

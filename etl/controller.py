@@ -23,92 +23,102 @@ class ETLController(UtilsABC):
         self.fetch_race_control_data()
 
     def fetch_session_data(self):
+        print("Fetching sessions data from 2026...")
         url = f"https://api.openf1.org/v1/sessions?year=2026&csv=true"
         response = requests.get(url)
         if response.status_code == 200:
             with open(f"{DATA_DIR}/raw/sessions/session_2026.csv", "wb") as f:
                 f.write(response.content)
-            print(f"Data for session 2026 saved successfully.")
+            print(f"Data for sessions from 2026 saved successfully.")
         else:
-            print(f"Failed to fetch data for session 2026. Status code: {response.status_code}")
+            print(f"Failed to fetch data for sessions from 2026. Status code: {response.status_code}")
 
     def session_list(self):
+        print("Filtering sessions for races that were not cancelled...")
         df = pl.read_csv(f"{DATA_DIR}/raw/sessions/session_2026.csv")
         df = df.filter((pl.col('session_name') == 'Race') & ~pl.col('is_cancelled'))
         self.session_keys = df['session_key'].to_list()
         return self.session_keys
 
     def fetch_drivers_data(self):
+        print("Fetching drivers data...")
         for session_keys in self.session_keys:
             url = f"https://api.openf1.org/v1/drivers?session_key={session_keys}&csv=true"
             response = requests.get(url)
             if response.status_code == 200:
                 with open(f"{DATA_DIR}/raw/drivers/drivers_{session_keys}.csv", "wb") as f:
                     f.write(response.content)
-                print(f"Data for session {session_keys} saved successfully.")
+                print(f"Data for drivers on session {session_keys} saved successfully.")
             else:
                 print(f"Failed to fetch data for session {session_keys}. Status code: {response.status_code}")  
             time.sleep(1)
 
     def fetch_laps_data(self):
+        print("Fetching laps data...")
         for session_key in self.session_keys:
             url = f"https://api.openf1.org/v1/laps?session_key={session_key}&csv=true"
             response = requests.get(url)
             if response.status_code == 200:
                 with open(f"{DATA_DIR}/raw/laps/laps_{session_key}.csv", "wb") as f:
                     f.write(response.content)
-                print(f"Data for session {session_key} saved successfully.")
+                print(f"Data for laps on session {session_key} saved successfully.")
             else:
                 print(f"Failed to fetch data for session {session_key}. Status code: {response.status_code}")
             time.sleep(1)
 
     def fetch_stints_data(self):
+        print("Fetching stints data...")
         for session_key in self.session_keys:
             url = f"https://api.openf1.org/v1/stints?session_key={session_key}&csv=true"
             response = requests.get(url)
             if response.status_code == 200:
                 with open(f"{DATA_DIR}/raw/stints/stints_{session_key}.csv", "wb") as f:
                     f.write(response.content)
-                print(f"Data for session {session_key} saved successfully.")
+                print(f"Data for stints on session {session_key} saved successfully.")
             else:
                 print(f"Failed to fetch data for session {session_key}. Status code: {response.status_code}")
             time.sleep(1)
 
     def fetch_pits_data(self):
+        print("Fetching pits data...")
         for session_key in self.session_keys:
             url = f"https://api.openf1.org/v1/pit?session_key={session_key}&csv=true"
             response = requests.get(url)
             if response.status_code == 200:
                 with open(f"{DATA_DIR}/raw/pits/pits_{session_key}.csv", "wb") as f:
                     f.write(response.content)
-                print(f"Data for session {session_key} saved successfully.")
+                print(f"Data for pits on session {session_key} saved successfully.")
             else:
                 print(f"Failed to fetch data for session {session_key}. Status code: {response.status_code}")
             time.sleep(1)
 
     def fetch_weather_data(self):
+        print("Fetching weather data...")
         for session_key in self.session_keys:
             url = f"https://api.openf1.org/v1/weather?session_key={session_key}&csv=true"
             response = requests.get(url)
             if response.status_code == 200:
                 with open(f"{DATA_DIR}/raw/weather/weather_{session_key}.csv", "wb") as f:
                     f.write(response.content)
-                print(f"Data for session {session_key} saved successfully.")
+                print(f"Data for weather on session {session_key} saved successfully.")
             else:
                 print(f"Failed to fetch data for session {session_key}. Status code: {response.status_code}")
             time.sleep(1)
 
     def fetch_race_control_data(self):
+        print("Fetching race control data...")
         for session_key in self.session_keys:
             url = f"https://api.openf1.org/v1/race_control?session_key={session_key}&csv=true"
             response = requests.get(url)
             if response.status_code == 200:
                 with open(f"{DATA_DIR}/raw/race_control/race_control_{session_key}.csv", "wb") as f:
                     f.write(response.content)
-                print(f"Data for session {session_key} saved successfully.")
+                print(f"Data for race control on session {session_key} saved successfully.")
             else:
                 print(f"Failed to fetch data for session {session_key}. Status code: {response.status_code}")
             time.sleep(1)
+        
+        print("Data extraction completed.")
 
     def transform(self):
         self.read_raw_data()
@@ -118,9 +128,9 @@ class ETLController(UtilsABC):
         mid_df = self.add_safety_car_flags(mid_df)
         final_df = self.clean_laps(mid_df)
         self.write_output(final_df)
-        print(f"{mid_df.height} laps processed, {final_df.height} laps after cleaning.")
 
     def read_raw_data(self):
+        print("Reading raw data from CSV files...")
         self.laps_df = pl.read_csv(f"{DATA_DIR}/raw/laps/laps_[0-9]*.csv").with_columns(
             pl.col("date_start").str.to_datetime(time_zone="UTC")
         )
@@ -133,6 +143,7 @@ class ETLController(UtilsABC):
         )
 
     def build_lap_table(self):
+        print("Building lap table by joining laps, stints, drivers, sessions, and weather data...")
         mid_df = (
             self.laps_df.join_where(
                 self.stints_df,
@@ -210,6 +221,9 @@ class ETLController(UtilsABC):
         final_df = final_df.filter(
             pl.col("lap_duration") <= 1.07 * pl.col("lap_duration").median().over("session_key", "driver_number")
         )
+        print(f"Filtered {mid_df.height - final_df.height} laps based on cleaning criteria.")
+        print(final_df.head(20))
+        print(f"{mid_df.height} laps processed, {final_df.height} laps after cleaning.")
         return final_df
 
     def write_output(self, final_df):
@@ -217,6 +231,7 @@ class ETLController(UtilsABC):
         final_df.write_parquet(f"{DATA_DIR}/output_data/laps.parquet")
 
     def load(self):
+        print("Loading data into the database...")
         df = pl.read_parquet(f"{DATA_DIR}/output_data/laps.parquet")
         session_keys = df["session_key"].unique().to_list()
         with self.engine.begin() as conn:
