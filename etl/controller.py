@@ -12,113 +12,63 @@ class ETLController(UtilsABC):
         super().__init__()
         self.session_keys = []
 
+    SESSION_ENDPOINTS = [
+        ("drivers", "drivers", "drivers"),
+        ("laps", "laps", "laps"),
+        ("stints", "stints", "stints"),
+        ("pits", "pit", "pits"),
+        ("weather", "weather", "weather"),
+        ("race control", "race_control", "race_control"),
+    ]
+    MAX_RETRIES = 5
+
     def extract(self):
         self.fetch_session_data()
         self.session_list()
-        self.fetch_drivers_data()
-        self.fetch_laps_data()
-        self.fetch_stints_data()
-        self.fetch_pits_data()
-        self.fetch_weather_data()
-        self.fetch_race_control_data()
+        for label, endpoint, folder in self.SESSION_ENDPOINTS:
+            self.fetch_per_session(label, endpoint, folder)
+        print("Data extraction completed.")
+
+    def get_with_retry(self, url):
+        for attempt in range(self.MAX_RETRIES + 1):
+            response = requests.get(url)
+            if response.status_code != 429 or attempt == self.MAX_RETRIES:
+                return response
+            retry_after = response.headers.get("Retry-After")
+            wait = int(retry_after) if retry_after and retry_after.isdigit() else 2 ** (attempt + 1)
+            print(f"Rate limited (429), retrying in {wait}s...")
+            time.sleep(wait)
 
     def fetch_session_data(self):
-        print("Fetching sessions data from 2026...")
-        url = f"https://api.openf1.org/v1/sessions?year=2026&csv=true"
-        response = requests.get(url)
+        print("Fetching sessions data from 2024 to 2026...")
+        url = f"https://api.openf1.org/v1/sessions?year>=2024&year<=2026&csv=true"
+        response = self.get_with_retry(url)
         if response.status_code == 200:
-            with open(f"{DATA_DIR}/raw/sessions/session_2026.csv", "wb") as f:
+            with open(f"{DATA_DIR}/raw/sessions/sessions.csv", "wb") as f:
                 f.write(response.content)
-            print(f"Data for sessions from 2026 saved successfully.")
+            print(f"Data for sessions from 2024 to 2026 saved successfully.")
         else:
-            print(f"Failed to fetch data for sessions from 2026. Status code: {response.status_code}")
+            print(f"Failed to fetch data for sessions from 2024 to 2026. Status code: {response.status_code}")
 
     def session_list(self):
         print("Filtering sessions for races that were not cancelled...")
-        df = pl.read_csv(f"{DATA_DIR}/raw/sessions/session_2026.csv")
+        df = pl.read_csv(f"{DATA_DIR}/raw/sessions/sessions.csv")
         df = df.filter((pl.col('session_name') == 'Race') & ~pl.col('is_cancelled'))
         self.session_keys = df['session_key'].to_list()
         return self.session_keys
 
-    def fetch_drivers_data(self):
-        print("Fetching drivers data...")
-        for session_keys in self.session_keys:
-            url = f"https://api.openf1.org/v1/drivers?session_key={session_keys}&csv=true"
-            response = requests.get(url)
-            if response.status_code == 200:
-                with open(f"{DATA_DIR}/raw/drivers/drivers_{session_keys}.csv", "wb") as f:
-                    f.write(response.content)
-                print(f"Data for drivers on session {session_keys} saved successfully.")
-            else:
-                print(f"Failed to fetch data for session {session_keys}. Status code: {response.status_code}")  
-            time.sleep(1)
-
-    def fetch_laps_data(self):
-        print("Fetching laps data...")
+    def fetch_per_session(self, label, endpoint, folder):
+        print(f"Fetching {label} data...")
         for session_key in self.session_keys:
-            url = f"https://api.openf1.org/v1/laps?session_key={session_key}&csv=true"
-            response = requests.get(url)
+            url = f"https://api.openf1.org/v1/{endpoint}?session_key={session_key}&csv=true"
+            response = self.get_with_retry(url)
             if response.status_code == 200:
-                with open(f"{DATA_DIR}/raw/laps/laps_{session_key}.csv", "wb") as f:
+                with open(f"{DATA_DIR}/raw/{folder}/{folder}_{session_key}.csv", "wb") as f:
                     f.write(response.content)
-                print(f"Data for laps on session {session_key} saved successfully.")
+                print(f"Data for {label} on session {session_key} saved successfully.")
             else:
                 print(f"Failed to fetch data for session {session_key}. Status code: {response.status_code}")
             time.sleep(1)
-
-    def fetch_stints_data(self):
-        print("Fetching stints data...")
-        for session_key in self.session_keys:
-            url = f"https://api.openf1.org/v1/stints?session_key={session_key}&csv=true"
-            response = requests.get(url)
-            if response.status_code == 200:
-                with open(f"{DATA_DIR}/raw/stints/stints_{session_key}.csv", "wb") as f:
-                    f.write(response.content)
-                print(f"Data for stints on session {session_key} saved successfully.")
-            else:
-                print(f"Failed to fetch data for session {session_key}. Status code: {response.status_code}")
-            time.sleep(1)
-
-    def fetch_pits_data(self):
-        print("Fetching pits data...")
-        for session_key in self.session_keys:
-            url = f"https://api.openf1.org/v1/pit?session_key={session_key}&csv=true"
-            response = requests.get(url)
-            if response.status_code == 200:
-                with open(f"{DATA_DIR}/raw/pits/pits_{session_key}.csv", "wb") as f:
-                    f.write(response.content)
-                print(f"Data for pits on session {session_key} saved successfully.")
-            else:
-                print(f"Failed to fetch data for session {session_key}. Status code: {response.status_code}")
-            time.sleep(1)
-
-    def fetch_weather_data(self):
-        print("Fetching weather data...")
-        for session_key in self.session_keys:
-            url = f"https://api.openf1.org/v1/weather?session_key={session_key}&csv=true"
-            response = requests.get(url)
-            if response.status_code == 200:
-                with open(f"{DATA_DIR}/raw/weather/weather_{session_key}.csv", "wb") as f:
-                    f.write(response.content)
-                print(f"Data for weather on session {session_key} saved successfully.")
-            else:
-                print(f"Failed to fetch data for session {session_key}. Status code: {response.status_code}")
-            time.sleep(1)
-
-    def fetch_race_control_data(self):
-        print("Fetching race control data...")
-        for session_key in self.session_keys:
-            url = f"https://api.openf1.org/v1/race_control?session_key={session_key}&csv=true"
-            response = requests.get(url)
-            if response.status_code == 200:
-                with open(f"{DATA_DIR}/raw/race_control/race_control_{session_key}.csv", "wb") as f:
-                    f.write(response.content)
-                print(f"Data for race control on session {session_key} saved successfully.")
-            else:
-                print(f"Failed to fetch data for session {session_key}. Status code: {response.status_code}")
-            time.sleep(1)
-        
-        print("Data extraction completed.")
 
     def transform(self):
         self.read_raw_data()
@@ -136,7 +86,7 @@ class ETLController(UtilsABC):
             pl.col("date_start").str.to_datetime(time_zone="UTC")
         )
         self.stints_df = pl.read_csv(f"{DATA_DIR}/raw/stints/stints_[0-9]*.csv")
-        self.session_df = pl.read_csv(f"{DATA_DIR}/raw/sessions/session_[0-9]*.csv")
+        self.session_df = pl.read_csv(f"{DATA_DIR}/raw/sessions/sessions.csv")
         self.drivers_df = pl.read_csv(f"{DATA_DIR}/raw/drivers/drivers_[0-9]*.csv")
         self.race_controls_df = pl.read_csv(f"{DATA_DIR}/raw/race_control/race_control_[0-9]*.csv")
         self.weather_df = pl.read_csv(f"{DATA_DIR}/raw/weather/weather_[0-9]*.csv").with_columns(

@@ -41,14 +41,17 @@ flowchart LR
     A[🌐 OpenF1 API] -->|extract| B[(etl/data/raw/*.csv)]
     B -->|transform| C[(etl/data/output_data/laps.parquet)]
     C -->|load| D[(🐘 PostgreSQL)]
-    C --> E[🧠 Lap-time model]
+    D -->|plot| H[📊 plots/ + analytics_* tables]
+    D -->|features| I[🧮 X, y + train/test split]
+    I --> E[🧠 Lap-time model]
     E --> F[🔁 Strategy simulator]
     F --> G[🏁 Optimal pit strategy]
 ```
 
 ### Extract
 
-Downloads every non-cancelled **2026 race** from [OpenF1](https://openf1.org) (free, no API key) as CSV:
+Downloads every non-cancelled race from the **2024, 2025 and 2026** seasons from [OpenF1](https://openf1.org) (free, no API key) as CSV.
+Requests that hit the API rate limit (HTTP 429) are retried with backoff, honouring the `Retry-After` header.
 
 | Endpoint | What it gives |
 |---|---|
@@ -72,7 +75,32 @@ Builds a single, model-ready lap table with **Polars**:
 
 ### Load
 
-Writes the clean table to PostgreSQL. Reloads are **idempotent**: rows for the sessions being loaded are deleted before appending.
+Writes the clean `laps` and `stints` tables to PostgreSQL. Reloads are **idempotent**: rows for the sessions being loaded are deleted before appending.
+
+### Analytics
+
+Saves the EDA plots to `plots/` (lap time vs tyre life, lap time per driver, stint length per compound, average lap per team)
+and stores their numbers as a new run in the `analytics_*` tables, tagged with an optional `--label` and the current git commit.
+The tables are created from `ml/scripts/*.sql` on first use.
+
+### Features
+
+Turns the `laps` table into model inputs (`ml/features.py`):
+
+| Feature | Encoding |
+|---|---|
+| `tyre_life` | numeric — tyre degradation |
+| `compound` | ordinal: SOFT=0, MEDIUM=1, HARD=2 |
+| `lap_number` | numeric — proxy for fuel load |
+| `track_temperature` | numeric |
+| `team_name` | one-hot; renamed teams are merged (`Kick Sauber` → `Audi`, `RB` → `Racing Bulls`) |
+| `year` | numeric |
+
+The target is `lap_duration` (seconds). The feature column order is saved to `ml/models/feature_columns.json`
+so the simulator can build rows with exactly the same columns.
+
+Train/test is split **by season** (default: train on 2024–2025, test on 2026), so laps from the same race never land on both sides.
+A random split would leak near-identical consecutive laps into the test set and inflate the score.
 
 ---
 
@@ -80,7 +108,7 @@ Writes the clean table to PostgreSQL. Reloads are **idempotent**: rows for the s
 
 ```
 predictive_race_strategy/
-├── main.py               # CLI entry point (download / process / merge)
+├── main.py               # CLI entry point (download / process / merge / plot / features)
 ├── controller.py         # base classes + database engine
 ├── etl/
 │   ├── controller.py     # ETLController: extract, transform, load
@@ -88,6 +116,13 @@ predictive_race_strategy/
 │   └── data/
 │       ├── raw/          # CSVs as downloaded from OpenF1 (git-ignored)
 │       └── output_data/  # laps.parquet, stints.parquet — clean tables
+├── ml/
+│   ├── controller.py     # MLController: database queries and EDA plots
+│   ├── analytics.py      # aggregates behind the plots, saved to analytics_* tables
+│   ├── features.py       # MLfeatures: encoding, X/y, season split
+│   ├── scripts/          # SQL for the analytics_* tables
+│   └── models/           # feature_columns.json (and, later, trained models)
+├── plots/                # EDA plots
 └── requirements.txt
 ```
 
@@ -144,6 +179,13 @@ python main.py --merge 1
 
 # Or everything at once
 python main.py --download 1 --process 1 --merge 1
+
+# Save the EDA plots and their results as a labelled analytics run
+python main.py --plot 1 --label "baseline"
+
+# Build the features and split train/test by season (test = 2026 by default)
+python main.py --features 1
+python main.py --features 1 --test-year 2025
 ```
 
 > **Note:** the extract step writes into `etl/data/raw/<endpoint>/` — make sure the folders
@@ -155,10 +197,12 @@ python main.py --download 1 --process 1 --merge 1
 
 | | |
 |---|---|
-| Season | 2026 |
-| Races | 17 |
-| Clean laps | 15,269 |
+| Seasons | 2024, 2025, 2026 |
+| Races | 64 (23 + 24 + 17) |
+| Clean laps | 58,403 (21,526 + 21,608 + 15,269) |
+| Stints | 3,685 |
 | Columns | 56 (timing, sectors, speed traps, tyres, weather, flags) |
+| Train / test | 43,134 laps (2024–2025) / 15,269 laps (2026) |
 
 ---
 
@@ -167,7 +211,10 @@ python main.py --download 1 --process 1 --merge 1
 - [x] Extract race data from the OpenF1 API
 - [x] Build and clean the lap-level feature table
 - [x] Load into PostgreSQL
-- [ ] Feature engineering (fuel load proxy, track evolution, circuit encoding)
+- [x] Exploratory analysis (plots + analytics tables)
+- [x] Feature engineering (tyre life, compound, fuel load proxy, team, track temperature)
+- [x] Train/test split by season
+- [ ] More features (track evolution, circuit encoding)
 - [ ] Train and evaluate lap-time models (XGBoost vs. Random Forest)
 - [ ] Strategy simulator over pit-stop windows and compound choices
 - [ ] Visualize predicted vs. actual race strategies

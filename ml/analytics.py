@@ -4,10 +4,10 @@ from pathlib import Path
 import polars as pl
 from sqlalchemy import Engine, text
 
-SCRIPTS_DIR = Path(__file__).resolve().parent / "scripts"  # run in file-name order
+SCRIPTS_DIR = Path(__file__).resolve().parent / "scripts" 
 
 COMPOUNDS = ["SOFT", "MEDIUM", "HARD"]
-MIN_LAPS = 10  # drivers/teams with fewer clean laps are left out of fastest/slowest
+MIN_LAPS = 10 
 
 
 def tyre_degradation(laps_df: pl.DataFrame) -> pl.DataFrame:
