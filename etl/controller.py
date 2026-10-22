@@ -40,15 +40,15 @@ class ETLController(UtilsABC):
             time.sleep(wait)
 
     def fetch_session_data(self):
-        print("Fetching sessions data from 2025 and 2026...")
-        url = f"https://api.openf1.org/v1/sessions?year>=2025&year<=2026&csv=true"
+        print("Fetching sessions data from 2024 to 2026...")
+        url = f"https://api.openf1.org/v1/sessions?year>=2024&year<=2026&csv=true"
         response = self.get_with_retry(url)
         if response.status_code == 200:
             with open(f"{DATA_DIR}/raw/sessions/sessions.csv", "wb") as f:
                 f.write(response.content)
-            print(f"Data for sessions from 2025 and 2026 saved successfully.")
+            print(f"Data for sessions from 2024 to 2026 saved successfully.")
         else:
-            print(f"Failed to fetch data for sessions from 2025 and 2026. Status code: {response.status_code}")
+            print(f"Failed to fetch data for sessions from 2024 to 2026. Status code: {response.status_code}")
 
     def session_list(self):
         print("Filtering sessions for races that were not cancelled...")
