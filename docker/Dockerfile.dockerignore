@@ -3,5 +3,5 @@
 .git/
 __pycache__/
 notebook/
-data/raw/
+etl/data/raw/
 *.md

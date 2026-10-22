@@ -10,3 +10,4 @@ python-dotenv
 sqlalchemy
 psycopg[binary]
 click
+pandas
