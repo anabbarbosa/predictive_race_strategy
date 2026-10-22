@@ -38,8 +38,8 @@ the project is a **data engineering pipeline** that builds that table from sever
 
 ```mermaid
 flowchart LR
-    A[🌐 OpenF1 API] -->|extract| B[(data/raw/*.csv)]
-    B -->|transform| C[(data/output_data/laps.parquet)]
+    A[🌐 OpenF1 API] -->|extract| B[(etl/data/raw/*.csv)]
+    B -->|transform| C[(etl/data/output_data/laps.parquet)]
     C -->|load| D[(🐘 PostgreSQL)]
     C --> E[🧠 Lap-time model]
     E --> F[🔁 Strategy simulator]
@@ -84,10 +84,10 @@ predictive_race_strategy/
 ├── controller.py         # base classes + database engine
 ├── etl/
 │   ├── controller.py     # ETLController: extract, transform, load
-│   └── db_setup.py       # creates the Postgres database
-├── data/
-│   ├── raw/              # CSVs as downloaded from OpenF1 (git-ignored)
-│   └── output_data/      # laps.parquet — clean lap table
+│   ├── db_setup.py       # creates the Postgres database
+│   └── data/
+│       ├── raw/          # CSVs as downloaded from OpenF1 (git-ignored)
+│       └── output_data/  # laps.parquet, stints.parquet — clean tables
 └── requirements.txt
 ```
 
@@ -136,7 +136,7 @@ Each step can be run on its own or chained together:
 # Download raw data from OpenF1
 python main.py --download 1
 
-# Build the clean lap table (data/output_data/laps.parquet)
+# Build the clean lap and stint tables (etl/data/output_data/)
 python main.py --process 1
 
 # Load it into PostgreSQL
@@ -146,7 +146,7 @@ python main.py --merge 1
 python main.py --download 1 --process 1 --merge 1
 ```
 
-> **Note:** the extract step writes into `data/raw/<endpoint>/` — make sure the folders
+> **Note:** the extract step writes into `etl/data/raw/<endpoint>/` — make sure the folders
 > `sessions`, `drivers`, `laps`, `stints`, `pits`, `weather` and `race_control` exist first.
 
 ---
