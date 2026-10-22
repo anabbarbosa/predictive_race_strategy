@@ -5,7 +5,7 @@ import polars as pl
 from sqlalchemy import inspect, text
 from controller import UtilsABC
 
-DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+DATA_DIR = Path(__file__).resolve().parent / "data"
 
 class ETLController(UtilsABC):
     def __init__(self):
@@ -127,7 +127,8 @@ class ETLController(UtilsABC):
         mid_df = self.add_lap_flags(mid_df)
         mid_df = self.add_safety_car_flags(mid_df)
         final_df = self.clean_laps(mid_df)
-        self.write_output(final_df)
+        self.write_output(final_df, "laps")
+        self.write_output(self.build_stint_table(), "stints")
 
     def read_raw_data(self):
         print("Reading raw data from CSV files...")
@@ -226,16 +227,39 @@ class ETLController(UtilsABC):
         print(f"{mid_df.height} laps processed, {final_df.height} laps after cleaning.")
         return final_df
 
-    def write_output(self, final_df):
+    def build_stint_table(self):
+        print("Building stint table from stints, drivers and sessions data...")
+        sessions = self.session_df.select("session_key", "circuit_short_name", "year")
+        drivers = self.drivers_df.select("session_key", "driver_number", "broadcast_name", "team_name", "team_colour")
+        stints_df = (
+            self.stints_df.filter(pl.col("compound").is_not_null())
+            .join(drivers, on=["session_key", "driver_number"], how="left")
+            .join(sessions, on="session_key", how="left")
+            .with_columns(stint_length=pl.col("lap_end") - pl.col("lap_start") + 1)
+            .sort("session_key", "driver_number", "stint_number")
+        )
+        print(f"{stints_df.height} stints built.")
+        return stints_df
+
+    def write_output(self, final_df, name):
         (DATA_DIR / "output_data").mkdir(parents=True, exist_ok=True)
-        final_df.write_parquet(f"{DATA_DIR}/output_data/laps.parquet")
+        final_df.write_parquet(f"{DATA_DIR}/output_data/{name}.parquet")
 
     def load(self):
         print("Loading data into the database...")
-        df = pl.read_parquet(f"{DATA_DIR}/output_data/laps.parquet")
-        session_keys = df["session_key"].unique().to_list()
         with self.engine.begin() as conn:
-            if inspect(conn).has_table("laps"):
-                conn.execute(text("DELETE FROM laps WHERE session_key = ANY(:keys)"), {"keys": session_keys})
-            df.write_database("laps", connection=conn, if_table_exists="append")
-        print(f"{df.height} laps from {len(session_keys)} sessions loaded into the database.")
+            for name in ("laps", "stints"):
+                df = pl.read_parquet(f"{DATA_DIR}/output_data/{name}.parquet")
+                session_keys = df["session_key"].unique().to_list()
+                if inspect(conn).has_table(name):
+                    conn.execute(text(f"DELETE FROM {name} WHERE session_key = ANY(:keys)"), {"keys": session_keys})
+                df.write_database(name, connection=conn, if_table_exists="append")
+                print(f"{df.height} {name} from {len(session_keys)} sessions loaded into the database.")
+            conn.execute(text("""
+                CREATE OR REPLACE VIEW team_race_pace AS
+                SELECT session_key, circuit_short_name, year, team_name,
+                       AVG(lap_duration) AS avg_lap, COUNT(*) AS n_laps
+                FROM laps
+                GROUP BY session_key, circuit_short_name, year, team_name
+            """))
+        print("View team_race_pace refreshed.")

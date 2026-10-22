@@ -24,7 +24,7 @@ services:
       PGHOST: db
       PGPORT: "5432"
     volumes:
-      - ../data:/app/data
+      - ../etl/data:/app/etl/data
     depends_on:
       db:
         condition: service_healthy
