@@ -43,7 +43,7 @@ flowchart LR
     C -->|load| D[(🐘 PostgreSQL)]
     D -->|plot| H[📊 plots/ + analytics_* tables]
     D -->|features| I[🧮 X, y + train/test split]
-    I --> E[🧠 Lap-time model]
+    I -->|baseline / models| E[🧠 Lap-time model]
     E --> F[🔁 Strategy simulator]
     F --> G[🏁 Optimal pit strategy]
 ```
@@ -96,11 +96,40 @@ Turns the `laps` table into model inputs (`ml/features.py`):
 | `team_name` | one-hot; renamed teams are merged (`Kick Sauber` → `Audi`, `RB` → `Racing Bulls`) |
 | `year` | numeric |
 
-The target is `lap_duration` (seconds). The feature column order is saved to `ml/models/feature_columns.json`
-so the simulator can build rows with exactly the same columns.
+The target is **`lap_delta`**: the lap time minus the median lap time of that race (seconds).
+The feature column order is saved to `ml/columns/feature_columns.json` so the simulator can build rows with exactly the same columns.
+
+> **Why a delta and not the raw lap time?** Most of the variation in raw lap time comes from the circuit
+> (~75 s in Monaco vs ~105 s in Spa) and from the season (2026 cars are ~2.3 s slower on average), and none of the
+> features can tell circuits apart. Predicting the absolute `lap_duration`, both models did **worse** than predicting
+> the mean (MAE 10.8 s vs 9.9 s). Subtracting the race median cancels circuit and season pace, so the model only has to learn
+> what changes *within* a race — tyre wear, compound, fuel and team. That is all the simulator needs: when
+> strategies for the same race are compared, the race median is the same for all of them and cancels out.
+> The trade-off: the model answers *"how much does this strategy gain or lose?"*, not *"how long is the race?"*.
 
 Train/test is split **by season** (default: train on 2024–2025, test on 2026), so laps from the same race never land on both sides.
 A random split would leak near-identical consecutive laps into the test set and inflate the score.
+
+### Models
+
+Every model is evaluated on the same test season (2026) with **MAE** and **RMSE**, in seconds of `lap_delta`:
+
+| Model | File | MAE | RMSE |
+|---|---|---|---|
+| Baseline A: training mean for every lap | `ml/baseline.py` | 1.32 | 1.75 |
+| Baseline B: training mean per compound | `ml/baseline.py` | 1.30 | 1.73 |
+| **Random Forest** (defaults) | `ml/models.py` | **1.06** | **1.47** |
+| XGBoost (defaults) | `ml/models.py` | 1.10 | 1.52 |
+
+The Random Forest is about **0.25 s per lap (~19%)** more accurate than the best baseline.
+The baselines are computed from the training seasons only, so they are an honest reference that every model must beat.
+
+`--models` also saves two evaluation plots to `plots/`:
+
+| Plot | What it shows |
+|---|---|
+| `predicted_vs_actual.png` | Points follow the diagonal, but predictions stay within about ±3 s while actual deltas go to ±5 s — the model gets the direction right but is conservative at the extremes |
+| `residuals_vs_tyre_life.png` | Residuals are centred on zero with no trend, so tyre degradation is captured. The large errors (+10 to +30 s) are always slower-than-predicted laps at low tyre life, likely race events (traffic, SC) the features can't see |
 
 ---
 
@@ -108,7 +137,7 @@ A random split would leak near-identical consecutive laps into the test set and 
 
 ```
 predictive_race_strategy/
-├── main.py               # CLI entry point (download / process / merge / plot / features)
+├── main.py               # CLI entry point (download / process / merge / plot / features / baseline / models)
 ├── controller.py         # base classes + database engine
 ├── etl/
 │   ├── controller.py     # ETLController: extract, transform, load
@@ -119,10 +148,12 @@ predictive_race_strategy/
 ├── ml/
 │   ├── controller.py     # MLController: database queries and EDA plots
 │   ├── analytics.py      # aggregates behind the plots, saved to analytics_* tables
-│   ├── features.py       # MLfeatures: encoding, X/y, season split
+│   ├── features.py       # MLfeatures: race delta target, encoding, X/y, season split
+│   ├── baseline.py       # MLbaseline: mean and mean-per-compound baselines, MAE/RMSE
+│   ├── models.py         # MLModels: Random Forest and XGBoost, results table, evaluation plots
 │   ├── scripts/          # SQL for the analytics_* tables
-│   └── models/           # feature_columns.json (and, later, trained models)
-├── plots/                # EDA plots
+│   └── columns/          # feature_columns.json
+├── plots/                # EDA and model evaluation plots
 └── requirements.txt
 ```
 
@@ -186,7 +217,16 @@ python main.py --plot 1 --label "baseline"
 # Build the features and split train/test by season (test = 2026 by default)
 python main.py --features 1
 python main.py --features 1 --test-year 2025
+
+# Evaluate the baselines only
+python main.py --baseline 1
+
+# Train Random Forest and XGBoost, print the results table and save the evaluation plots
+python main.py --models 1
 ```
+
+> **Windows tip:** if printing the results table raises `UnicodeEncodeError`, run
+> `$env:PYTHONIOENCODING="utf-8"` first.
 
 > **Note:** the extract step writes into `etl/data/raw/<endpoint>/` — make sure the folders
 > `sessions`, `drivers`, `laps`, `stints`, `pits`, `weather` and `race_control` exist first.
@@ -214,8 +254,11 @@ python main.py --features 1 --test-year 2025
 - [x] Exploratory analysis (plots + analytics tables)
 - [x] Feature engineering (tyre life, compound, fuel load proxy, team, track temperature)
 - [x] Train/test split by season
-- [ ] More features (track evolution, circuit encoding)
-- [ ] Train and evaluate lap-time models (XGBoost vs. Random Forest)
+- [x] Baselines (global mean, mean per compound)
+- [x] Train and evaluate lap-time models (XGBoost vs. Random Forest)
+- [x] Race-relative target (`lap_delta`) so circuit and season pace cancel out
+- [ ] Tune hyperparameters with grouped cross-validation
+- [ ] More features (track evolution, driver)
 - [ ] Strategy simulator over pit-stop windows and compound choices
 - [ ] Visualize predicted vs. actual race strategies
 
