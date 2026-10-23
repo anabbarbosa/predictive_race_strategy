@@ -13,10 +13,11 @@ FEATURE_QUERY = """
     WHERE track_temperature IS NOT NULL
 """
 
-MODELS_DIR = Path(__file__).resolve().parent / "models"
+MODELS_DIR = Path(__file__).resolve().parent / "columns"
 FEATURE_COLUMNS_FILE = MODELS_DIR / "feature_columns.json"
 
-TARGET = "lap_duration"
+LAP_TIME = "lap_duration"
+TARGET = "lap_delta"  # lap time minus the race median, so circuit and season pace cancel out
 COMPOUND_ORDER = {"SOFT": 0, "MEDIUM": 1, "HARD": 2}
 TEAM_ALIASES = {"Kick Sauber": "Audi", "RB": "Racing Bulls"} #renamed team    
 
@@ -34,10 +35,14 @@ class MLfeatures(MLController):
             .to_dummies("team_name")
         )
 
+    def add_race_delta(self, laps_df: pl.DataFrame) -> pl.DataFrame:
+        race_median = pl.col(LAP_TIME).median().over("session_key")
+        return laps_df.with_columns((pl.col(LAP_TIME) - race_median).alias(TARGET))
+
     def build_features(self, laps_df: pl.DataFrame) -> tuple[pl.DataFrame, pl.Series]:
-        encoded_df = self.encode(laps_df)
+        encoded_df = self.encode(self.add_race_delta(laps_df))
         y = encoded_df[TARGET]
-        x = encoded_df.drop(TARGET, "session_key")
+        x = encoded_df.drop(TARGET, LAP_TIME, "session_key")
         self.check_features(x)
         return x, y
 
