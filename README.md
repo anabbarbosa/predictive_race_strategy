@@ -377,6 +377,17 @@ Safety Car; here every car pays the full green-flag pit loss.
 latest race there and can be changed) and get four tabs: the **best strategy** with its pit window, the **Safety Car**
 Monte Carlo, the **undercut** table and the **traffic** ranking. It calls the same classes as the CLI.
 
+### Results web page
+
+`web/index.html` is a static page (plain HTML, CSS and JavaScript, no libraries) with every comparison above as an
+interactive chart: hover for values, toggle series in the legends, pick a circuit for the strategy search, and open
+"Show table" under any chart for the numbers. It follows the system light/dark theme, with a toggle.
+
+`python main.py --web 1` (`ml/export_web.py`) writes everything it shows to `web/data.js` — model scores, the circuit-feature
+experiment, SHAP values, degradation curves, pit loss, the best strategy at all 26 circuits, the validation tables, and the
+Safety Car, undercut and traffic results for Shanghai. It is a script rather than JSON so the page also works opened
+straight from disk, where browsers block `fetch()`. Re-run it after `--tune` or `--validate` to refresh the page.
+
 ---
 
 ## 📁 Project structure
@@ -385,6 +396,7 @@ Monte Carlo, the **undercut** table and the **traffic** ranking. It calls the sa
 predictive_race_strategy/
 ├── main.py               # CLI entry point, one flag per step
 ├── app.py                # Streamlit app: pick a race, see the recommended strategy
+├── web/                  # static results page: index.html, style.css, app.js, data.js (from --web)
 ├── controller.py         # base classes + database engine
 ├── etl/
 │   ├── controller.py     # ETLController: extract, transform, load
@@ -406,6 +418,7 @@ predictive_race_strategy/
 │   ├── safety_car.py     # MLSafetyCar: Safety Car / VSC Monte Carlo
 │   ├── undercut.py       # MLUndercut: two cars, who gains by pitting first
 │   ├── traffic.py        # MLTraffic: dirty air estimate and strategies against a real field
+│   ├── export_web.py     # MLExportWeb: every result the web page shows, to web/data.js
 │   ├── scripts/          # SQL for the analytics_* tables
 │   ├── columns/          # feature_columns.json, circuit_features.csv
 │   └── trained/          # saved models (git-ignored, rebuilt by --tune)
@@ -509,6 +522,9 @@ python main.py --traffic 1 --circuit Shanghai --team Mercedes
 # The same in a browser
 streamlit run app.py
 
+# Export the results for the static web page, then open web/index.html
+python main.py --web 1
+
 # From a fresh clone, everything at once
 python main.py --download 1 --process 1 --merge 1 --tune 1 --pitstops 1 --validate 1
 ```
@@ -582,6 +598,7 @@ override them with `--total-laps`, `--track-temp` and `--pit-loss`. `--traffic` 
 - [x] Undercut vs overcut between two cars
 - [x] Traffic: dirty air and overtaking against a real field
 - [x] Streamlit app
+- [x] Static results web page with interactive charts
 - [ ] Per-circuit compound offsets, so the model can tell compounds apart
 - [ ] Start stints on used tyres
 - [ ] Combine Safety Cars and traffic in one race simulation
