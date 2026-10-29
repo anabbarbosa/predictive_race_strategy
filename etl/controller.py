@@ -79,6 +79,10 @@ class ETLController(UtilsABC):
         final_df = self.clean_laps(mid_df)
         self.write_output(final_df, "laps")
         self.write_output(self.build_stint_table(), "stints")
+        self.write_output(self.build_pit_stop_table(mid_df), "pit_stops")
+        self.write_output(self.build_result_table(mid_df), "results")
+        self.write_output(self.build_safety_car_periods(), "safety_car_periods")
+        self.write_output(self.build_race_lap_table(), "race_laps")
 
     def read_raw_data(self):
         print("Reading raw data from CSV files...")
@@ -89,6 +93,9 @@ class ETLController(UtilsABC):
         self.session_df = pl.read_csv(f"{DATA_DIR}/raw/sessions/sessions.csv")
         self.drivers_df = pl.read_csv(f"{DATA_DIR}/raw/drivers/drivers_[0-9]*.csv")
         self.race_controls_df = pl.read_csv(f"{DATA_DIR}/raw/race_control/race_control_[0-9]*.csv")
+        self.pits_df = pl.read_csv(f"{DATA_DIR}/raw/pits/pits_[0-9]*.csv", infer_schema_length=None).with_columns(
+            pl.col("lane_duration", "stop_duration").cast(pl.Float64)
+        )
         self.weather_df = pl.read_csv(f"{DATA_DIR}/raw/weather/weather_[0-9]*.csv").with_columns(
             pl.col("date").str.to_datetime(time_zone="UTC")
         )
@@ -128,8 +135,9 @@ class ETLController(UtilsABC):
         )
         return mid_df
 
-    def add_safety_car_flags(self, mid_df):
-        sc_laps = (
+    def build_safety_car_periods(self):
+        race_laps = self.laps_df.group_by("session_key").agg(race_laps=pl.col("lap_number").max())
+        return (
             self.race_controls_df.filter(pl.col("category") == "SafetyCar")
             .sort("session_key", "date")
             .with_columns(
@@ -139,10 +147,27 @@ class ETLController(UtilsABC):
                 end_lap=pl.col("lap_number").shift(-1).over("session_key"),
             )
             .filter(pl.col("message").str.ends_with("DEPLOYED"))
-            .with_columns(pl.col("end_lap").fill_null(999))  # corrida terminou sob SC
+            .join(race_laps, on="session_key", how="left")
+            .with_columns(end_lap=pl.min_horizontal(pl.col("end_lap").fill_null(999), "race_laps"))
+            .join(self.session_df.select("session_key", "circuit_short_name", "year"), on="session_key", how="left")
+            .select("session_key", "circuit_short_name", "year", "race_laps", "sc_type",
+                    pl.col("lap_number").alias("start_lap"), "end_lap")
+        )
+
+    def build_race_lap_table(self):
+      return (
+            self.laps_df.filter(pl.col("date_start").is_not_null())
+            .select("session_key", "driver_number", "lap_number", "date_start", "lap_duration", "is_pit_out_lap")
+            .join(self.session_df.select("session_key", "circuit_short_name", "year"), on="session_key", how="left")
+            .sort("session_key", "driver_number", "lap_number")
+        )
+
+    def add_safety_car_flags(self, mid_df):
+        sc_laps = (
+            self.build_safety_car_periods()
             .select(
                 "session_key", "sc_type",
-                lap_number=pl.int_ranges("lap_number", pl.col("end_lap") + 1),
+                lap_number=pl.int_ranges("start_lap", pl.col("end_lap") + 1),
             )
             .explode("lap_number")
             .unique(["session_key", "lap_number"])
@@ -191,6 +216,110 @@ class ETLController(UtilsABC):
         print(f"{stints_df.height} stints built.")
         return stints_df
 
+    def build_pit_stop_table(self, mid_df):
+        print("Building pit stop table...")
+        keys = ["session_key", "driver_number"]
+        laps = mid_df.select(
+            *keys, "lap_number", "lap_duration", "is_safety_car", "is_vsc", "rainfall", "compound",
+            "circuit_short_name", "year",
+        )
+        clean = mid_df.filter(
+            ~pl.col("no_lap_time"),
+            pl.col("lap_number") != 1,
+            ~pl.col("is_out_lap"),
+            ~pl.col("is_in_lap"),
+            ~pl.col("is_safety_car"),
+            ~pl.col("is_vsc"),
+            pl.col("rainfall") == 0,
+        ).select(*keys, pl.col("lap_number").alias("ref_lap"), pl.col("lap_duration").alias("ref_duration"))
+
+        stops = self.pits_df.select(*keys, "lap_number", "lane_duration", "stop_duration")
+        reference = (
+            stops.join_where(
+                clean,
+                pl.col("session_key") == pl.col("session_key_right"),
+                pl.col("driver_number") == pl.col("driver_number_right"),
+                pl.col("ref_lap").is_between(pl.col("lap_number") - 3, pl.col("lap_number") + 4),
+            )
+            .group_by(*keys, "lap_number")
+            .agg(ref_duration=pl.col("ref_duration").median(), n_ref_laps=pl.len())
+        )
+        in_lap = laps.rename({"lap_duration": "in_lap_duration", "is_safety_car": "in_sc", "is_vsc": "in_vsc"})
+        out_lap = laps.select(
+            *keys,
+            (pl.col("lap_number") - 1).alias("lap_number"),
+            pl.col("lap_duration").alias("out_lap_duration"),
+            pl.col("compound").alias("new_compound"),
+            (pl.col("is_safety_car") | pl.col("is_vsc")).alias("out_neutralised"),
+        )
+        pit_stops = (
+            stops.join(in_lap, on=[*keys, "lap_number"], how="left")
+            .join(out_lap, on=[*keys, "lap_number"], how="left")
+            .join(reference, on=[*keys, "lap_number"], how="left")
+            .with_columns(
+                pit_loss=pl.col("in_lap_duration") + pl.col("out_lap_duration") - 2 * pl.col("ref_duration"),
+            )
+            .with_columns(
+                is_representative=(
+                    pl.col("pit_loss").is_not_null()
+                    & (pl.col("n_ref_laps") >= 2)
+                    & ~pl.col("in_sc") & ~pl.col("in_vsc") & ~pl.col("out_neutralised")
+                    & (pl.col("rainfall") == 0)
+                    & ~pl.col("new_compound").is_in(["WET", "INTERMEDIATE"])
+                    & (pl.col("stop_duration").is_null() | (pl.col("stop_duration") <= 5))
+                    & (pl.col("lane_duration") < 60)
+                ).fill_null(False)
+            )
+            .select(
+                *keys, "circuit_short_name", "year", "lap_number", "lane_duration", "stop_duration",
+                "in_lap_duration", "out_lap_duration", "ref_duration", "n_ref_laps", "pit_loss", "is_representative",
+            )
+            .sort(*keys, "lap_number")
+        )
+        print(f"{pit_stops.height} pit stops built, {pit_stops['is_representative'].sum()} representative.")
+        return pit_stops
+
+    def build_result_table(self, mid_df):
+        print("Building result table...")
+        keys = ["session_key", "driver_number"]
+        neutralised = mid_df.group_by("session_key").agg(
+            safety_car_laps=pl.col("lap_number").filter(pl.col("is_safety_car")).n_unique(),
+            vsc_laps=pl.col("lap_number").filter(pl.col("is_vsc")).n_unique(),
+            had_rain=(pl.col("rainfall") > 0).any(),
+        )
+        timed = pl.col("lap_number") > 1
+        suspended = (
+            self.laps_df.filter(pl.col("date_start").is_not_null())
+            .sort(*keys, "lap_number")
+            .group_by(*keys)
+            .agg(stopped=(pl.col("date_start").diff().dt.total_seconds() > 300).any())
+            .group_by("session_key")
+            .agg(suspended=pl.col("stopped").mean() > 0.5)
+        )
+        results = (
+            self.laps_df.filter(pl.col("date_start").is_not_null())
+            .group_by(*keys)
+            .agg(
+                laps_completed=pl.col("lap_number").max(),
+                timed_from_lap=pl.col("lap_number").filter(timed).min(),
+                first_timed_start=pl.col("date_start").filter(timed).sort_by(pl.col("lap_number").filter(timed)).first(),
+                last_lap_start=pl.col("date_start").sort_by("lap_number").last(),
+            )
+            .sort("session_key", "laps_completed", "last_lap_start", descending=[False, True, False])
+            .with_columns(
+                race_time=(pl.col("last_lap_start") - pl.col("first_timed_start")).dt.total_milliseconds() / 1000,
+                position=pl.int_range(1, pl.len() + 1).over("session_key"),
+            )
+            .join(self.drivers_df.select(*keys, "team_name"), on=keys, how="left")
+            .join(self.session_df.select("session_key", "circuit_short_name", "year"), on="session_key", how="left")
+            .join(neutralised, on="session_key", how="left")
+            .join(suspended, on="session_key", how="left")
+            .drop("first_timed_start", "last_lap_start")
+            .sort("session_key", "position")
+        )
+        print(f"{results.height} driver results built.")
+        return results
+
     def write_output(self, final_df, name):
         (DATA_DIR / "output_data").mkdir(parents=True, exist_ok=True)
         final_df.write_parquet(f"{DATA_DIR}/output_data/{name}.parquet")
@@ -198,7 +327,7 @@ class ETLController(UtilsABC):
     def load(self):
         print("Loading data into the database...")
         with self.engine.begin() as conn:
-            for name in ("laps", "stints"):
+            for name in ("laps", "stints", "pit_stops", "results", "safety_car_periods", "race_laps"):
                 df = pl.read_parquet(f"{DATA_DIR}/output_data/{name}.parquet")
                 session_keys = df["session_key"].unique().to_list()
                 if inspect(conn).has_table(name):
