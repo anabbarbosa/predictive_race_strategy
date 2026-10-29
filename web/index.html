@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Race Strategy Results</title>
+  <meta name="description" content="Machine learning lap-time models and pit-stop strategy simulation on OpenF1 data.">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="hero">
+    <p class="eyebrow">Predictive race strategy · OpenF1 2024–2026</p>
+    <h1>Predicting F1 lap times, then searching for the fastest pit strategy</h1>
+    <p class="lede">A model learns how much slower each lap gets as tyres age; a simulator sums those laps and the
+      pit-stop losses for every possible strategy. This page shows how the models compare, what they learned, and how
+      the simulator holds up against real 2026 races.</p>
+    <span class="equation">race time = Σ predicted lap time + stops × pit loss</span>
+  </header>
+
+  <nav class="toc" aria-label="Sections">
+    <div class="inner">
+      <a href="#overview">Overview</a>
+      <a href="#models">Models</a>
+      <a href="#explain">What it learned</a>
+      <a href="#pit-loss">Pit loss</a>
+      <a href="#strategy">Strategy</a>
+      <a href="#validation">Validation</a>
+      <a href="#safety-car">Safety Car</a>
+      <a href="#undercut">Undercut</a>
+      <a href="#traffic">Traffic</a>
+      <button id="theme-toggle" type="button" aria-label="Toggle dark mode">Dark mode</button>
+    </div>
+  </nav>
+
+  <main>
+    <section id="overview">
+      <h2>Overview</h2>
+      <p class="section-intro" id="overview-intro"></p>
+      <div class="grid stats" id="overview-stats"></div>
+    </section>
+
+    <section id="models">
+      <h2>Lap-time models</h2>
+      <p class="section-intro">Every model predicts <strong>lap_delta</strong>: the fuel-corrected lap time minus that
+        driver's median lap in the race. They are trained on 2024–2025 and scored on the 2026 season they never saw.
+        Lower is better.</p>
+      <div class="grid two">
+        <div class="card">
+          <h3>Error on the test season</h3>
+          <p class="sub">Seconds per lap. Grey = baselines every model must beat; dashed line = best baseline.</p>
+          <div class="controls">
+            <div class="segmented" role="group" aria-label="Metric" id="metric-toggle">
+              <button type="button" data-metric="mae" aria-pressed="true">MAE</button>
+              <button type="button" data-metric="rmse" aria-pressed="false">RMSE</button>
+            </div>
+          </div>
+          <div class="chart" id="models-chart"></div>
+          <div id="models-table"></div>
+        </div>
+        <div class="card">
+          <h3>Circuit features experiment</h3>
+          <p class="sub">The same fixed XGBoost with and without circuit descriptors (test MAE, s).</p>
+          <div class="chart" id="circuit-chart"></div>
+          <p class="callout">Track length (<code>circuit_lap_time</code>) helps a little. Degradation measured per circuit in
+            2024–2025 makes 2026 <strong>worse</strong>: new cars and tyres wear differently, so it was left out.</p>
+          <div id="circuit-table"></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="explain">
+      <h2>What the model learned</h2>
+      <p class="section-intro">SHAP splits every prediction into one contribution per feature. Tyre age dominates;
+        the tyre compound barely moves the prediction, which is the model's main limitation.</p>
+      <div class="grid two">
+        <div class="card">
+          <h3>Feature importance (mean |SHAP|)</h3>
+          <p class="sub">Seconds a feature moves the predicted lap on an average 2026 lap.</p>
+          <div class="chart" id="shap-chart"></div>
+          <div id="shap-table"></div>
+        </div>
+        <div class="card">
+          <h3>Contribution of tyre life, by compound</h3>
+          <p class="sub">One dot per test lap. The three compounds follow the same curve.</p>
+          <ul class="legend" id="shap-legend"></ul>
+          <div class="chart" id="shap-scatter"></div>
+        </div>
+      </div>
+      <div class="card" style="margin-top:16px">
+        <h3>Predicted degradation curves</h3>
+        <p class="sub">Monotone XGBoost, lap 40, McLaren, median temperature. Dotted lines: 95th percentile of tyre life
+          in training — beyond them the trees predict a flat line.</p>
+        <ul class="legend" id="deg-legend"></ul>
+        <div class="chart" id="deg-chart"></div>
+        <div id="deg-table"></div>
+      </div>
+    </section>
+
+    <section id="pit-loss">
+      <h2>Pit-stop loss per circuit</h2>
+      <p class="section-intro">Method A is OpenF1's pit-lane time (entry to exit). Method B is the race time the stop
+        actually cost: in-lap + out-lap minus two normal laps. B is what the simulator uses.</p>
+      <div class="card">
+        <ul class="legend" id="pit-legend"></ul>
+        <div class="chart" id="pit-chart"></div>
+        <div id="pit-table"></div>
+      </div>
+    </section>
+
+    <section id="strategy">
+      <h2>Strategy search</h2>
+      <p class="section-intro">Every 1- and 2-stop strategy with two different dry compounds, stints of 5 laps to the
+        99th percentile of tyre life, all through the model in one batch. Team: <span id="strategy-team"></span>.</p>
+      <div class="controls">
+        <label>Circuit <select id="circuit-select"></select></label>
+      </div>
+      <div class="grid stats" id="strategy-stats"></div>
+      <div class="grid two">
+        <div class="card">
+          <h3 id="window-title">Pit window</h3>
+          <p class="sub">Race time vs the best pit lap for the best 1-stop compound pair. Shaded: within 1 s of the best.</p>
+          <div class="chart" id="window-chart"></div>
+        </div>
+        <div class="card">
+          <h3>Best strategies</h3>
+          <p class="sub">Gap to the fastest strategy, in seconds.</p>
+          <div id="strategy-top"></div>
+        </div>
+      </div>
+      <div class="card" style="margin-top:16px">
+        <h3>One stop beats two everywhere</h3>
+        <p class="sub">Seconds the best 2-stop strategy loses to the best 1-stop, per circuit.</p>
+        <div class="chart" id="stops-chart"></div>
+        <div id="stops-table"></div>
+      </div>
+    </section>
+
+    <section id="validation">
+      <h2>Validation against real 2026 races</h2>
+      <p class="section-intro">The real strategies of the top 5 finishers of every 2026 race, simulated and compared with
+        their real race times. Races are grouped by their worst event, none of which the simulator models.</p>
+      <div class="grid stats" id="validation-stats"></div>
+      <div class="grid two">
+        <div class="card">
+          <h3>Gap to the race average: predicted vs actual</h3>
+          <p class="sub">One dot per driver. On the diagonal = the simulator got the driver's gap exactly right.</p>
+          <ul class="legend" id="validation-legend"></ul>
+          <div class="chart" id="validation-chart"></div>
+        </div>
+        <div class="card">
+          <h3>Accuracy by race type</h3>
+          <p class="sub">Race-time error grows with every neutralised lap; the gap between drivers stays small.</p>
+          <div id="validation-table"></div>
+        </div>
+      </div>
+      <div class="card" style="margin-top:16px">
+        <h3>Optimal strategy vs what the winner did</h3>
+        <p class="sub">Predicted gain = seconds the simulator thinks the optimal strategy saves over the winner's.</p>
+        <div id="optimal-table"></div>
+      </div>
+    </section>
+
+    <section id="safety-car">
+      <h2>Safety Car Monte Carlo</h2>
+      <p class="section-intro" id="sc-intro"></p>
+      <div class="grid stats" id="sc-stats"></div>
+      <div class="grid two">
+        <div class="card">
+          <h3>Seconds lost to the best choice of each race</h3>
+          <p class="sub">Regret over the random races: box 25–75%, whiskers 5–95%, line = median, dot = mean.</p>
+          <div class="chart" id="sc-chart"></div>
+        </div>
+        <div class="card">
+          <h3>Strategies ranked by expected time</h3>
+          <p class="sub">Win % = share of random races where the strategy is the best one.</p>
+          <div id="sc-table"></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="undercut">
+      <h2>Undercut vs overcut</h2>
+      <p class="section-intro" id="undercut-intro"></p>
+      <div class="card">
+        <h3>Seconds car A gains by pitting first</h3>
+        <p class="sub">Red: the undercut works if the gap before the stop is smaller than the value. Blue would mean
+          the overcut wins — it never does here, because the model has no cold tyres on the out-lap.</p>
+        <div class="chart" id="undercut-chart"></div>
+      </div>
+    </section>
+
+    <section id="traffic">
+      <h2>Traffic</h2>
+      <p class="section-intro" id="traffic-intro"></p>
+      <div class="grid two">
+        <div class="card">
+          <h3>Dirty air, measured from the data</h3>
+          <p class="sub">Seconds lost per lap by gap to the car ahead, against laps in free air (model residuals).</p>
+          <div class="chart" id="dirty-chart"></div>
+          <div id="dirty-table"></div>
+        </div>
+        <div class="card">
+          <h3>Strategies re-ranked with traffic</h3>
+          <p class="sub">Seconds behind the best strategy without traffic.</p>
+          <ul class="legend" id="traffic-legend"></ul>
+          <div class="chart" id="traffic-chart"></div>
+          <div id="traffic-table"></div>
+        </div>
+      </div>
+      <p class="callout" id="traffic-callout"></p>
+    </section>
+  </main>
+
+  <footer id="footer"></footer>
+  <div class="tooltip" id="tooltip" role="status" aria-live="polite"></div>
+
+  <script src="data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
