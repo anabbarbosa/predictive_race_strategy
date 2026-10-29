@@ -10,6 +10,10 @@
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-Storage-4169E1?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
 [![OpenF1](https://img.shields.io/badge/Data-OpenF1-E10600)](https://openf1.org)
 
+**[🌐 See the results page →](https://anabbarbosa.github.io/predictive_race_strategy/)**
+
+[![Results page: model comparison, SHAP, pit loss, strategy search, validation, Safety Car, undercut and traffic](web/preview.png)](https://anabbarbosa.github.io/predictive_race_strategy/)
+
 </div>
 
 ---
@@ -379,7 +383,8 @@ Monte Carlo, the **undercut** table and the **traffic** ranking. It calls the sa
 
 ### Results web page
 
-`web/index.html` is a static page (plain HTML, CSS and JavaScript, no libraries) with every comparison above as an
+The page is published at **https://anabbarbosa.github.io/predictive_race_strategy/** (the `gh-pages` branch holds a copy of
+`web/`). `web/index.html` is a static page (plain HTML, CSS and JavaScript, no libraries) with every comparison above as an
 interactive chart: hover for values, toggle series in the legends, pick a circuit for the strategy search, and open
 "Show table" under any chart for the numbers. It follows the system light/dark theme, with a toggle.
 
