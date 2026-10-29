@@ -5,6 +5,7 @@ from ml.analytics import save_results
 from ml.baseline import MLbaseline
 from ml.controller import MLController
 from ml.explain import MLExplain
+from ml.export_web import MLExportWeb
 from ml.features import MLfeatures
 from ml.models import MLModels
 from ml.pit_loss import MLPitLoss
@@ -51,6 +52,7 @@ def parse_compounds(ctx, param, value):
 @click.option("--safety-car", type=click.BOOL, default=False, help="Run the best strategies for a circuit and team through random Safety Car and VSC races (Monte Carlo) and save plots/safety_car_mc.png.")
 @click.option("--undercut", type=click.BOOL, default=False, help="Seconds gained by pitting before the car in front, for every pit lap and wait, and save plots/undercut.png.")
 @click.option("--traffic", type=click.BOOL, default=False, help="Rank the best strategies again racing the field of the latest race at the circuit, with dirty air and overtaking, and save plots/traffic.png.")
+@click.option("--web", type=click.BOOL, default=False, help="Export the model comparisons and simulation results to web/data.js for the web page (web/index.html).")
 @click.option("--circuit", help="Circuit short name as in the laps table, e.g. Spielberg (with --simulate, --safety-car, --undercut, --traffic).")
 @click.option("--team", help="Team name as in the laps table, e.g. McLaren (with --simulate, --safety-car, --undercut, --traffic).")
 @click.option("--strategy", callback=parse_strategy, help="Predict only this strategy, as COMPOUND:LAPS, e.g. MEDIUM:18,HARD:39 (with --simulate).")
@@ -66,14 +68,14 @@ def parse_compounds(ctx, param, value):
 @click.option("--test-year", default=2026, show_default=True, help="Season used as the test set; earlier seasons are the training set.")
 @click.option("--label", default=None, help="Label for the analytics run, e.g. 'before 1-stop strategy'.")
 def main(download, process, merge, plot, features, baseline, models, tune, pitstops, simulate, validate, shap, safety_car,
-         undercut, traffic, circuit, team, strategy, max_stops, total_laps, track_temp, pit_loss, session_key, driver,
+         undercut, traffic, web, circuit, team, strategy, max_stops, total_laps, track_temp, pit_loss, session_key, driver,
          n_sims, compounds, n_iter, test_year, label):
     race_steps = {"--simulate": simulate, "--safety-car": safety_car, "--undercut": undercut, "--traffic": traffic}
     if not (download or process or merge or plot or features or baseline or models or tune or pitstops or validate
-            or shap or any(race_steps.values())):
+            or shap or web or any(race_steps.values())):
         raise click.UsageError("Choose at least one step: --download 1, --process 1, --merge 1, --plot 1, --features 1, "
                                "--baseline 1, --models 1, --tune 1, --pitstops 1, --simulate 1, --validate 1, --shap 1, "
-                               "--safety-car 1, --undercut 1 or --traffic 1.")
+                               "--safety-car 1, --undercut 1, --traffic 1 or --web 1.")
     if any(race_steps.values()):
         # click has no "required only when another flag is on", so check it here before any step runs
         missing = [name for name, value in [("--circuit", circuit), ("--team", team)] if value is None]
@@ -138,6 +140,9 @@ def main(download, process, merge, plot, features, baseline, models, tune, pitst
             MLTraffic().run(circuit, team, test_year, max_stops)
     except ValueError as e:
         raise click.UsageError(str(e))
+
+    if web:
+        MLExportWeb().run(test_year)
 
 
 if __name__ == "__main__":

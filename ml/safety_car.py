@@ -190,6 +190,7 @@ class MLSafetyCar(MLSimulate):
 
         sims = self.monte_carlo(candidates, strategies, grid, total_laps, pit_loss, ratios, periods, rates, limits, n_sims)
         summary = self.summarise(sims, candidates, strategies)
+        self.sims = sims
         neutralised = sims.group_by("sim").agg(pl.col("neutralised").first())["neutralised"].mean()
         print(f"{len(candidates)} strategies x {n_sims} races, {neutralised:.0%} of them with at least one SC or VSC")
         with pl.Config(tbl_rows=15, tbl_width_chars=200, float_precision=2):
