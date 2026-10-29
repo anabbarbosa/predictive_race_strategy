@@ -24,7 +24,7 @@ class MLbaseline(MLfeatures):
 
     def run(self, test_year: int = 2026) -> pl.DataFrame:
         laps_df = self.load_laps()
-        x, y = self.build_features(laps_df)
+        x, y = self.build_features(laps_df, test_year)
         x_train, x_test, y_train, y_test = self.split_by_season(laps_df, x, y, test_year)
 
         results = pl.DataFrame([

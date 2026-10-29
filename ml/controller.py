@@ -8,8 +8,7 @@ from controller import ProjectUtils
 
 class MLController(ProjectUtils):
     def fetch_data(self, query: str = "SELECT * FROM laps") -> pl.DataFrame:
-        """Fetch data from the database using the provided SQL query."""
-        return pl.read_database(query, connection=self.engine)
+        return pl.read_database(query, connection=self.engine, infer_schema_length=None)
 
     def lap_vs_tyre_life(self, in_df: pl.DataFrame, x_col: str, y_col: str, title: str):
         compound_colors = {
@@ -40,8 +39,6 @@ class MLController(ProjectUtils):
             pl.col("circuit_short_name") == "Melbourne",
             pl.col("year") == 2026,
         )
-
-        # Second driver of each team (by car number) gets a dashed line
         drivers = mid_df.select("broadcast_name", "driver_number", "team_name").unique()
         dashed = set(
             drivers.filter(
@@ -126,7 +123,6 @@ class MLController(ProjectUtils):
         ax.invert_yaxis()
 
     def save_plot(self, laps_df: pl.DataFrame, stints_df: pl.DataFrame, output_dir: str = "plots"):
-        """Draw every plot and save each one as a PNG in output_dir."""
         out = Path(output_dir)
         out.mkdir(parents=True, exist_ok=True)
         plots = {
