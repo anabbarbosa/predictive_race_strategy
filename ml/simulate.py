@@ -6,6 +6,7 @@ import numpy as np
 import polars as pl
 from xgboost import XGBRegressor
 
+from ml.degradation import DegradationModel, MLDegradation
 from ml.features import COMPOUND_ORDER, FUEL_SECONDS_PER_LAP, TEAM_ALIASES, MLfeatures
 from ml.pit_loss import MLPitLoss
 from ml.tuning import TRAINED_DIR, MLTuning
@@ -15,6 +16,7 @@ Strategy = list[tuple[str, int]]
 MIN_STINT = 5
 STINT_QUANTILE = 0.99
 WINDOW_SECONDS = 1.0
+LAP_MODEL = "xgboost"  # or "degradation" (ml/degradation.py); main.py sets it from --lap-model
 
 
 class MLSimulate(MLfeatures):
@@ -23,7 +25,9 @@ class MLSimulate(MLfeatures):
         self.columns = self.load_feature_columns()
         self.circuits = self.load_circuit_features()
 
-    def load_model(self, file_name: str = "xgboost_monotone.json") -> XGBRegressor:
+    def load_model(self, file_name: str = "xgboost_monotone.json", lap_model: str | None = None) -> XGBRegressor | DegradationModel:
+        if (lap_model or LAP_MODEL) == "degradation":
+            return MLDegradation().load()
         model = XGBRegressor()
         model.load_model(TRAINED_DIR / file_name)
         return model
@@ -72,12 +76,19 @@ class MLSimulate(MLfeatures):
             .select(self.columns)
         )
 
+    def predict(self, model, rows: pl.DataFrame, circuit: str) -> np.ndarray:
+        if isinstance(model, DegradationModel):
+            return model.predict_circuit(rows.to_numpy(), circuit)
+        return model.predict(rows.to_numpy())
+
     def lap_times(self, strategies: list[Strategy], model, total_laps: int, team: str, circuit: str,
                   track_temperature: float, year: int, base_pace: float = 0.0) -> pl.DataFrame:
         for strategy in strategies:
             self.check_strategy(strategy, total_laps)
         laps_df = self.strategy_laps(strategies)
-        lap_delta = pl.Series(model.predict(self.build_rows(laps_df, team, circuit, track_temperature, year).to_numpy()))
+        lap_delta = pl.Series(self.predict(model, self.build_rows(laps_df, team, circuit, track_temperature, year), circuit))
+        if base_pace and isinstance(model, DegradationModel):
+            lap_delta = lap_delta - laps_df.with_columns(d=lap_delta).select(pl.col("d").median().over("strategy_id"))["d"]
         return laps_df.with_columns(
             lap_delta=lap_delta,
             lap_time=base_pace + lap_delta + FUEL_SECONDS_PER_LAP * (total_laps - pl.col("lap_number")),
@@ -95,7 +106,7 @@ class MLSimulate(MLfeatures):
             .join(pl.DataFrame({"tyre_life": range(total_laps)}), how="cross")
             .join(pl.DataFrame({"lap_number": range(1, total_laps + 1)}), how="cross")
         )
-        delta = model.predict(self.build_rows(grid, team, circuit, track_temperature, year).to_numpy())
+        delta = self.predict(model, self.build_rows(grid, team, circuit, track_temperature, year), circuit)
         fuel = FUEL_SECONDS_PER_LAP * (total_laps - grid["lap_number"].to_numpy())
         return (delta + fuel).reshape(len(COMPOUND_ORDER), total_laps, total_laps)
 

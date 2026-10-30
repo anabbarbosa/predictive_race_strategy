@@ -19,6 +19,14 @@ CIRCUIT_FEATURES_FILE = MODELS_DIR / "circuit_features.csv"
 CIRCUIT_COLUMNS = ["circuit_lap_time"]
 DEG_PRIOR_LAPS = 300
 
+PRACTICE_QUERY = """
+    SELECT session_key, meeting_key, circuit_short_name, driver_number, stint_number, compound, lap_number, lap_duration,
+           tyre_life, year
+    FROM practice_laps
+"""
+LONG_RUN_LAPS = 8
+FP_PRIOR_RUNS = 3
+
 LAP_TIME = "lap_duration"
 TARGET = "lap_delta"
 FUEL_SECONDS_PER_LAP = 0.05
@@ -77,9 +85,48 @@ class MLfeatures(MLController):
             .sort("circuit_short_name", "compound")
         )
 
+    def long_runs(self, practice_df: pl.DataFrame) -> pl.DataFrame:
+        stint = ["session_key", "driver_number", "stint_number"]
+        # every lap burns fuel and gets ~0.05 s faster: add it back so the slope is tyre wear only
+        return (
+            practice_df.with_columns(corrected=pl.col(LAP_TIME) + FUEL_SECONDS_PER_LAP * pl.col("lap_number"))
+            .with_columns(
+                dx=pl.col("tyre_life") - pl.col("tyre_life").mean().over(stint),
+                dy=pl.col("corrected") - pl.col("corrected").mean().over(stint),
+            )
+            .group_by(*stint, "meeting_key", "circuit_short_name", "compound", "year")
+            .agg(
+                n_laps=pl.len(),
+                span=pl.col("tyre_life").max() - pl.col("tyre_life").min(),
+                deg=(pl.col("dx") * pl.col("dy")).sum() / (pl.col("dx") ** 2).sum(),
+            )
+            .filter(pl.col("n_laps") >= LONG_RUN_LAPS, pl.col("span") >= LONG_RUN_LAPS - 1)
+        )
+
+    def practice_features(self, practice_df: pl.DataFrame, test_year: int) -> pl.DataFrame:
+        runs = self.long_runs(practice_df)
+        prior = runs.filter(pl.col("year") < test_year).group_by("compound").agg(compound_deg=pl.col("deg").median())
+        weekend = runs.group_by("meeting_key", "compound").agg(raw_deg=pl.col("deg").median(), n_runs=pl.len())
+        return (
+            runs.select("meeting_key", "circuit_short_name", "year").unique()
+            .join(prior, how="cross")
+            .join(weekend, on=["meeting_key", "compound"], how="left")
+            .with_columns(weight=pl.col("n_runs").fill_null(0) / (pl.col("n_runs").fill_null(0) + FP_PRIOR_RUNS))
+            .select(
+                "meeting_key", "circuit_short_name", "year", "compound",
+                fp_deg=pl.col("weight") * pl.col("raw_deg").fill_null(0) + (1 - pl.col("weight")) * pl.col("compound_deg"),
+                n_runs=pl.col("n_runs").fill_null(0),
+                compound_deg="compound_deg",
+            )
+            .sort("meeting_key", "compound")
+        )
+
     def add_circuit_features(self, laps_df: pl.DataFrame, circuits: pl.DataFrame) -> pl.DataFrame:
         return laps_df.join(circuits.select("circuit_short_name", "compound", *CIRCUIT_COLUMNS),
                             on=["circuit_short_name", "compound"], how="left", maintain_order="left")
+
+    def load_practice(self) -> pl.DataFrame:
+        return self.fetch_data(PRACTICE_QUERY)
 
     def build_features(self, laps_df: pl.DataFrame, test_year: int = 2026) -> tuple[pl.DataFrame, pl.Series]:
         self.circuits = self.circuit_features(laps_df, test_year)

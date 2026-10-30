@@ -47,7 +47,7 @@ class MLExplain(MLSimulate):
         print(f"Saved {file_path}")
 
     def run(self, test_year: int = 2026) -> pl.DataFrame:
-        model = self.load_model()
+        model = self.load_model(lap_model="xgboost")
         laps_df = self.load_laps()
         x, _ = self.build_features(laps_df, test_year)
         x_test = x.filter(pl.col("year") >= test_year).select(self.columns)

@@ -4,10 +4,12 @@ import polars as pl
 from scipy.stats import spearmanr
 
 from ml.pit_loss import MLPitLoss
+from ml.safety_car import COMPOUNDS, MLSafetyCar
 from ml.simulate import WINDOW_SECONDS, MLSimulate, Strategy
 
 RESULTS_DIR = Path(__file__).resolve().parent.parent / "results"
 TOP_N = 5
+REPLAY_SIMS = 300
 DRY = {"SOFT", "MEDIUM", "HARD"}
 
 
@@ -150,6 +152,57 @@ class MLValidate(MLSimulate):
             })
         return pl.DataFrame(rows)
 
+    def safety_car_replay(self, finishers: pl.DataFrame, stints: pl.DataFrame, model, pit_losses: dict[str, float],
+                          test_year: int) -> pl.DataFrame:
+        sc = MLSafetyCar()
+        periods = sc.neutral_periods(before_year=test_year)
+        ratios = dict(sc.neutral_pit_loss().select("sc_type", "ratio").iter_rows())
+        real = self.fetch_data(f"SELECT * FROM safety_car_periods WHERE year = {test_year}")
+        limits = self.stint_limits(test_year)
+        rows = []
+        for winner in finishers.filter(pl.col("position") == 1).iter_rows(named=True):
+            winner_stints = stints.filter(pl.col("session_key") == winner["session_key"],
+                                          pl.col("driver_number") == winner["driver_number"])
+            strategy, _ = self.real_strategy(winner_stints, winner["laps_completed"]) if winner_stints.height else (None, "")
+            if strategy is None:
+                continue
+            circuit, total_laps = winner["circuit_short_name"], winner["laps_completed"]
+            pit_loss = pit_losses[circuit]
+            args = (model, total_laps, winner["team_name"], circuit, winner["track_temperature"], test_year)
+            results, strategies = self.best_strategies(*args, pit_loss, 2, limits)
+            candidates = sc.candidates(results)
+            grid = self.lap_delta_grid(*args)
+            rates = sc.deployment_rates(periods, circuit, before_year=test_year)
+            sims = sc.monte_carlo(candidates, strategies, grid, total_laps, pit_loss, ratios, periods, rates, limits,
+                                  REPLAY_SIMS)
+            summary = sc.summarise(sims, candidates, strategies)
+            events = [(e["sc_type"], e["start_lap"], min(e["end_lap"], total_laps))
+                      for e in real.filter(pl.col("session_key") == winner["session_key"]).sort("start_lap").iter_rows(named=True)]
+            cum = sc.stint_table(grid)
+
+            def replay(strategy_id: int) -> tuple[str, int]:
+                _, pit_laps, compounds, _ = sc.play(strategies[strategy_id], events, cum, total_laps, pit_loss, ratios, limits)
+                bounds = [0, *pit_laps, total_laps]
+                return self.describe([(COMPOUNDS[c], b - a) for c, a, b in zip(compounds, bounds, bounds[1:])]), len(pit_laps)
+
+            green_plan, green_stops = replay(results["strategy_id"][0])
+            sc_plan, sc_stops = replay(summary["strategy_id"][0])
+            rows.append({
+                "circuit_short_name": circuit,
+                "group": winner["group"],
+                "neutralisations": ", ".join(f"{t} {a}-{b}" for t, a, b in events),
+                "winner_strategy": self.describe(strategy),
+                "green_plan_raced": green_plan,
+                "sc_plan_raced": sc_plan,
+                "winner_stops": len(strategy) - 1,
+                "green_stops": green_stops,
+                "sc_stops": sc_stops,
+            })
+        return pl.DataFrame(rows).with_columns(
+            green_same_stops=pl.col("green_stops") == pl.col("winner_stops"),
+            sc_same_stops=pl.col("sc_stops") == pl.col("winner_stops"),
+        )
+
     def run(self, test_year: int = 2026):
         model = self.load_model()
         pit_table = MLPitLoss().pit_loss_table()
@@ -161,19 +214,25 @@ class MLValidate(MLSimulate):
         drivers = self.accuracy(finishers, stints, model, pit_losses)
         summary = self.summary(drivers)
         optimal = self.optimal_vs_winner(drivers, finishers, stints, model, pit_losses, test_year)
+        replay = self.safety_car_replay(finishers, stints, model, pit_losses, test_year)
 
         RESULTS_DIR.mkdir(exist_ok=True)
-        for name, table in {"validation_drivers": drivers, "validation_summary": summary, "validation_optimal": optimal}.items():
+        for name, table in {"validation_drivers": drivers, "validation_summary": summary, "validation_optimal": optimal,
+                            "validation_safety_car": replay}.items():
             table.write_csv(RESULTS_DIR / f"{name}.csv", float_precision=3)
         with pl.Config(tbl_rows=-1, tbl_cols=-1, tbl_width_chars=200, float_precision=2):
             print(drivers.drop("session_key", "driver_number"))
             print(summary)
             print(optimal)
+            print(replay)
         one_stop = optimal.filter(pl.col("optimal_pit_lap_same_compounds").is_not_null())
         print(f"Same number of stops as the winner in {optimal['same_stops'].sum()}/{optimal.height} races, "
               f"same compounds in {optimal['same_compounds'].sum()}/{optimal.height}. "
               f"1-stop winners pitted inside the simulator's window for their compounds in "
               f"{one_stop['winner_pit_in_window'].sum()}/{one_stop.height} races. "
               f"Median predicted gain from the optimal strategy: {optimal['predicted_gain_s'].median():.2f} s.")
+        print(f"Raced through the real Safety Cars and VSCs, re-planning at each one: the green-flag best ends with the "
+              f"winner's number of stops in {replay['green_same_stops'].sum()}/{replay.height} races, the plan picked "
+              f"with Safety Cars in {replay['sc_same_stops'].sum()}/{replay.height}.")
         print(f"Saved validation tables to {RESULTS_DIR}")
         return drivers, summary, optimal

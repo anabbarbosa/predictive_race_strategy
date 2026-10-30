@@ -23,7 +23,7 @@ class MLTraffic(MLValidate):
         )
 
     def dirty_air(self) -> pl.DataFrame:
-        model = self.load_model()
+        model = self.load_model(lap_model="xgboost")  # residuals of every lap need the model trained on all features
         laps_df = self.load_laps()
         x, y = self.build_features(laps_df)
         residual = y.to_numpy() - model.predict(x.select(self.columns).to_numpy())
