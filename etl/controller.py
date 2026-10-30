@@ -20,6 +20,10 @@ class ETLController(UtilsABC):
         ("weather", "weather", "weather"),
         ("race control", "race_control", "race_control"),
     ]
+    PRACTICE_ENDPOINTS = [
+        ("practice laps", "laps", "practice_laps"),
+        ("practice stints", "stints", "practice_stints"),
+    ]
     MAX_RETRIES = 5
 
     def extract(self):
@@ -28,6 +32,13 @@ class ETLController(UtilsABC):
         for label, endpoint, folder in self.SESSION_ENDPOINTS:
             self.fetch_per_session(label, endpoint, folder)
         print("Data extraction completed.")
+
+    def extract_practice(self):
+        self.fetch_session_data()
+        practice_keys = self.practice_session_list()
+        for label, endpoint, folder in self.PRACTICE_ENDPOINTS:
+            self.fetch_per_session(label, endpoint, folder, practice_keys, skip_existing=True)
+        print("Practice data extraction completed.")
 
     def get_with_retry(self, url):
         for attempt in range(self.MAX_RETRIES + 1):
@@ -57,9 +68,22 @@ class ETLController(UtilsABC):
         self.session_keys = df['session_key'].to_list()
         return self.session_keys
 
-    def fetch_per_session(self, label, endpoint, folder):
+    def practice_session_list(self):
+        print("Filtering practice sessions of the race weekends...")
+        df = pl.read_csv(f"{DATA_DIR}/raw/sessions/sessions.csv")
+        race_meetings = df.filter((pl.col('session_name') == 'Race') & ~pl.col('is_cancelled'))['meeting_key']
+        df = df.filter(
+            pl.col('session_name').str.starts_with('Practice') & ~pl.col('is_cancelled')
+            & pl.col('meeting_key').is_in(race_meetings.implode())
+        )
+        return df['session_key'].to_list()
+
+    def fetch_per_session(self, label, endpoint, folder, session_keys=None, skip_existing=False):
         print(f"Fetching {label} data...")
-        for session_key in self.session_keys:
+        (DATA_DIR / "raw" / folder).mkdir(parents=True, exist_ok=True)
+        for session_key in self.session_keys if session_keys is None else session_keys:
+            if skip_existing and (DATA_DIR / "raw" / folder / f"{folder}_{session_key}.csv").exists():
+                continue
             url = f"https://api.openf1.org/v1/{endpoint}?session_key={session_key}&csv=true"
             response = self.get_with_retry(url)
             if response.status_code == 200:
@@ -83,6 +107,8 @@ class ETLController(UtilsABC):
         self.write_output(self.build_result_table(mid_df), "results")
         self.write_output(self.build_safety_car_periods(), "safety_car_periods")
         self.write_output(self.build_race_lap_table(), "race_laps")
+        if list((DATA_DIR / "raw" / "practice_laps").glob("*.csv")):
+            self.write_output(self.build_practice_lap_table(), "practice_laps")
 
     def read_raw_data(self):
         print("Reading raw data from CSV files...")
@@ -161,6 +187,41 @@ class ETLController(UtilsABC):
             .join(self.session_df.select("session_key", "circuit_short_name", "year"), on="session_key", how="left")
             .sort("session_key", "driver_number", "lap_number")
         )
+
+    def build_practice_lap_table(self):
+        print("Building practice lap table...")
+        laps = pl.read_csv(f"{DATA_DIR}/raw/practice_laps/practice_laps_[0-9]*.csv", infer_schema_length=None)
+        stints = pl.read_csv(f"{DATA_DIR}/raw/practice_stints/practice_stints_[0-9]*.csv", infer_schema_length=None)
+        practice_df = (
+            laps.select("session_key", "meeting_key", "driver_number", "lap_number", "lap_duration", "is_pit_out_lap")
+            .join_where(
+                stints.select("session_key", "driver_number", "stint_number", "compound", "lap_start", "lap_end",
+                              "tyre_age_at_start"),
+                pl.col("session_key") == pl.col("session_key_right"),
+                pl.col("driver_number") == pl.col("driver_number_right"),
+                pl.col("lap_number").is_between(pl.col("lap_start"), pl.col("lap_end")),
+            )
+            .drop("session_key_right", "driver_number_right")
+            .join(self.session_df.select("session_key", "session_name", "circuit_short_name", "year"),
+                  on="session_key", how="left")
+            .sort("session_key", "driver_number", "lap_number")
+            .with_columns(
+                tyre_life=pl.col("tyre_age_at_start") + (pl.col("lap_number") - pl.col("lap_start")),
+                is_in_lap=pl.col("lap_number") == pl.col("lap_end"),
+            )
+        )
+        # practice runs mix push laps with cool-down laps: keep only laps close to the stint's median pace
+        stint = ["session_key", "driver_number", "stint_number"]
+        final_df = practice_df.filter(
+            pl.col("lap_duration").is_not_null(),
+            ~pl.col("is_pit_out_lap").fill_null(False),
+            ~pl.col("is_in_lap"),
+            pl.col("compound").is_in(["SOFT", "MEDIUM", "HARD"]),
+        ).filter(
+            pl.col("lap_duration") <= 1.03 * pl.col("lap_duration").median().over(stint)
+        )
+        print(f"{practice_df.height} practice laps processed, {final_df.height} laps after cleaning.")
+        return final_df.drop("is_pit_out_lap", "is_in_lap", "lap_start", "lap_end")
 
     def add_safety_car_flags(self, mid_df):
         sc_laps = (
@@ -327,8 +388,11 @@ class ETLController(UtilsABC):
     def load(self):
         print("Loading data into the database...")
         with self.engine.begin() as conn:
-            for name in ("laps", "stints", "pit_stops", "results", "safety_car_periods", "race_laps"):
-                df = pl.read_parquet(f"{DATA_DIR}/output_data/{name}.parquet")
+            for name in ("laps", "stints", "pit_stops", "results", "safety_car_periods", "race_laps", "practice_laps"):
+                path = DATA_DIR / "output_data" / f"{name}.parquet"
+                if not path.exists():
+                    continue
+                df = pl.read_parquet(path)
                 session_keys = df["session_key"].unique().to_list()
                 if inspect(conn).has_table(name):
                     conn.execute(text(f"DELETE FROM {name} WHERE session_key = ANY(:keys)"), {"keys": session_keys})
