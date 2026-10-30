@@ -1,0 +1,15 @@
+circuit_short_name,group,neutralisations,winner_strategy,plan,green_plan_raced,sc_plan_raced,winner_stops,green_stops,sc_stops,winner_pit,plan_pit,raced_pit,green_same_stops,sc_same_stops
+Shanghai,Safety Car,SC 10-13,MEDIUM 10 -> HARD 46,MEDIUM 34 -> HARD 22,MEDIUM 12 -> HARD 44,MEDIUM 12 -> HARD 44,1,1,1,10,34,12,true,true
+Suzuka,Safety Car,SC 22-27,MEDIUM 22 -> HARD 31,SOFT 30 -> HARD 23,SOFT 26 -> HARD 27,SOFT 26 -> HARD 27,1,1,1,22,30,26,true,true
+Miami,Safety Car,SC 6-11,MEDIUM 26 -> HARD 31,MEDIUM 33 -> SOFT 24,SOFT 10 -> HARD 47,MEDIUM 10 -> HARD 47,1,1,1,26,33,10,true,true
+Montreal,Wet,"VSC 31-32, VSC 46-46, VSC 53-54",SOFT 30 -> MEDIUM 38,MEDIUM 47 -> SOFT 21,MEDIUM 31 -> HARD 37,MEDIUM 31 -> HARD 37,1,1,1,30,47,31,true,true
+Monte Carlo,Suspended,"SC 60-65, SC 66-78",MEDIUM 36 -> HARD 24 -> SOFT 5 -> SOFT 2 -> SOFT 11,HARD 55 -> MEDIUM 23,HARD 55 -> MEDIUM 23,HARD 55 -> MEDIUM 23,4,1,1,36,55,55,false,false
+Catalunya,VSC only,"VSC 41-42, VSC 63-65",SOFT 11 -> HARD 16 -> MEDIUM 14 -> HARD 25,MEDIUM 46 -> SOFT 20,MEDIUM 41 -> SOFT 25,MEDIUM 41 -> SOFT 25,3,1,1,11,46,41,false,false
+Spielberg,VSC only,"VSC 25-26, VSC 52-53",MEDIUM 19 -> HARD 24 -> HARD 28,MEDIUM 47 -> SOFT 24,MEDIUM 25 -> HARD 27 -> SOFT 19,MEDIUM 25 -> HARD 27 -> SOFT 19,2,2,2,19,47,25,true,true
+Silverstone,Safety Car,"VSC 22-22, VSC 39-39, SC 48-51, SC 51-52",MEDIUM 25 -> HARD 23 -> SOFT 4,SOFT 30 -> HARD 22,SOFT 28 -> HARD 24,SOFT 30 -> HARD 22,2,1,1,25,30,30,false,false
+Spa-Francorchamps,Safety Car,"SC 1-4, VSC 18-18, VSC 20-21",MEDIUM 18 -> HARD 26 -> SOFT 1,SOFT 26 -> HARD 19,SOFT 3 -> HARD 42,SOFT 3 -> HARD 42,2,1,1,18,26,3,false,false
+Zandvoort,Suspended,"VSC 55-57, VSC 70-70",MEDIUM 2 -> SOFT 19 -> HARD 26 -> HARD 25,MEDIUM 47 -> SOFT 25,MEDIUM 47 -> SOFT 25,MEDIUM 47 -> SOFT 25,3,1,1,2,47,47,false,false
+Monza,Suspended,"SC 3-28, VSC 28-29",HARD 3 -> MEDIUM 25 -> MEDIUM 25,SOFT 30 -> HARD 23,SOFT 27 -> MEDIUM 26,SOFT 27 -> MEDIUM 26,2,1,1,3,30,27,false,false
+Madring,VSC only,VSC 14-15,MEDIUM 14 -> HARD 43,SOFT 30 -> MEDIUM 27,SOFT 14 -> MEDIUM 43,SOFT 14 -> MEDIUM 43,1,1,1,14,30,14,true,true
+Baku,Safety Car,"SC 31-35, SC 36-38",MEDIUM 31 -> SOFT 5 -> SOFT 15,SOFT 30 -> HARD 21,SOFT 27 -> HARD 24,SOFT 30 -> HARD 21,2,1,1,31,30,30,false,false
+Singapore,VSC only,"VSC 8-9, VSC 39-40",SOFT 32 -> MEDIUM 30,MEDIUM 38 -> SOFT 24,MEDIUM 8 -> HARD 54,MEDIUM 8 -> HARD 54,1,1,1,32,38,8,true,true

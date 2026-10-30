@@ -25,8 +25,7 @@
       <div class="lights" role="img" aria-label="Five start lights, all lit">
         <span></span><span></span><span></span><span></span><span></span>
       </div>
-      <p class="lede">A model learns how much slower each lap gets as tyres age. A simulator adds up those laps and the
-        pit stops for every possible strategy, then gets checked against real 2026 races.</p>
+      <p class="lede">A lap-time model and a strategy simulator, checked against the real 2026 races.</p>
       <span class="equation">race time = Σ predicted lap time + stops × pit loss</span>
     </div>
   </header>
@@ -73,8 +72,7 @@
             <span>Qualifying · lower is faster</span>
           </div>
           <h2>Lap-time models</h2>
-          <p class="section-intro">Each model predicts <strong>lap_delta</strong>, the fuel-corrected lap time minus the
-            driver's race median. Trained on 2024–25, scored on the unseen 2026 season.</p>
+          <p class="section-intro">Trained on 2024–25, scored on the unseen 2026 season.</p>
         </div>
       </div>
       <div class="grid two">
@@ -94,8 +92,7 @@
           <h3>Circuit features experiment</h3>
           <p class="sub">Same XGBoost, with and without circuit descriptors. Test MAE, s.</p>
           <div class="chart" id="circuit-chart"></div>
-          <p class="callout">Track length (<code>circuit_lap_time</code>) helps a little. Degradation measured per circuit in
-            2024–2025 makes 2026 <strong>worse</strong>: new cars and tyres wear differently, so it was left out.</p>
+          <p class="callout">Track length helps a little; circuit degradation from 2024–25 makes 2026 <strong>worse</strong>.</p>
           <div id="circuit-table"></div>
         </div>
       </div>
@@ -110,8 +107,7 @@
             <span>Black &amp; white · under review</span>
           </div>
           <h2>What the model learned</h2>
-          <p class="section-intro">Tyre age dominates. The compound barely moves the prediction, which is the model's
-            main limitation.</p>
+          <p class="section-intro">Tyre age dominates; the compound barely moves the prediction.</p>
         </div>
       </div>
       <div class="grid two">
@@ -123,7 +119,7 @@
         </div>
         <div class="card">
           <h3>Contribution of tyre life, by compound</h3>
-          <p class="sub">One dot per test lap. All three compounds follow the same curve.</p>
+          <p class="sub">One dot per test lap.</p>
           <ul class="legend" id="shap-legend"></ul>
           <div class="chart" id="shap-scatter"></div>
         </div>
@@ -146,8 +142,7 @@
             <span>Pit board · box this lap</span>
           </div>
           <h2>Pit-stop loss per circuit</h2>
-          <p class="section-intro">A is OpenF1's pit-lane time. B is what the stop really cost (in-lap + out-lap minus
-            two normal laps), and it is what the simulator uses.</p>
+          <p class="section-intro">A: pit-lane time. B: in-lap + out-lap − 2 normal laps, used by the simulator.</p>
         </div>
       </div>
       <div class="card">
@@ -166,8 +161,7 @@
             <span>Tyre call</span>
           </div>
           <h2>Strategy search</h2>
-          <p class="section-intro">Every 1- and 2-stop strategy with two dry compounds, run through the model in one
-            batch. Team: <span id="strategy-team"></span>.</p>
+          <p class="section-intro">Every 1- and 2-stop strategy. Team: <span id="strategy-team"></span>.</p>
         </div>
       </div>
       <div class="controls">
@@ -203,8 +197,7 @@
             <span>Chequered flag · real results</span>
           </div>
           <h2>Validation against real 2026 races</h2>
-          <p class="section-intro">The top 5 of every 2026 race, simulated with their real strategies. Races are grouped by
-            their worst event, which the simulator does not model.</p>
+          <p class="section-intro">Top 5 of every 2026 race on their real strategies, grouped by the race's worst event.</p>
         </div>
       </div>
       <div class="grid stats" id="validation-stats"></div>
@@ -217,7 +210,7 @@
         </div>
         <div class="card">
           <h3>Accuracy by race type</h3>
-          <p class="sub">Race-time error grows with every neutralised lap; the gap between drivers stays small.</p>
+          <p class="sub">Race time vs gap between drivers.</p>
           <div id="validation-table"></div>
         </div>
       </div>
@@ -253,6 +246,12 @@
           <div id="sc-table"></div>
         </div>
       </div>
+      <div class="card spaced">
+        <h3>Raced through the real 2026 Safety Cars</h3>
+        <p class="sub">Plan picked before the race, re-planned at each real SC or VSC.</p>
+        <div class="grid stats" id="replay-stats"></div>
+        <div id="replay-table"></div>
+      </div>
     </section>
 
     <section id="undercut">
@@ -269,8 +268,7 @@
       </div>
       <div class="card">
         <h3>Seconds car A gains by pitting first</h3>
-        <p class="sub">The undercut works when the gap before the stop is below the value. The overcut never wins:
-          the model has no cold tyres on the out-lap.</p>
+        <p class="sub">The undercut works when the gap before the stop is below the value.</p>
         <div class="chart" id="undercut-chart"></div>
       </div>
     </section>
