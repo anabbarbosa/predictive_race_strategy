@@ -180,23 +180,28 @@ class MLValidate(MLSimulate):
                       for e in real.filter(pl.col("session_key") == winner["session_key"]).sort("start_lap").iter_rows(named=True)]
             cum = sc.stint_table(grid)
 
-            def replay(strategy_id: int) -> tuple[str, int]:
+            def replay(strategy_id: int) -> tuple[str, list[int]]:
                 _, pit_laps, compounds, _ = sc.play(strategies[strategy_id], events, cum, total_laps, pit_loss, ratios, limits)
                 bounds = [0, *pit_laps, total_laps]
-                return self.describe([(COMPOUNDS[c], b - a) for c, a, b in zip(compounds, bounds, bounds[1:])]), len(pit_laps)
+                return self.describe([(COMPOUNDS[c], b - a) for c, a, b in zip(compounds, bounds, bounds[1:])]), pit_laps
 
-            green_plan, green_stops = replay(results["strategy_id"][0])
-            sc_plan, sc_stops = replay(summary["strategy_id"][0])
+            plan = strategies[summary["strategy_id"][0]]
+            green_plan, green_pits = replay(results["strategy_id"][0])
+            sc_plan, sc_pits = replay(summary["strategy_id"][0])
             rows.append({
                 "circuit_short_name": circuit,
                 "group": winner["group"],
                 "neutralisations": ", ".join(f"{t} {a}-{b}" for t, a, b in events),
                 "winner_strategy": self.describe(strategy),
+                "plan": self.describe(plan),
                 "green_plan_raced": green_plan,
                 "sc_plan_raced": sc_plan,
                 "winner_stops": len(strategy) - 1,
-                "green_stops": green_stops,
-                "sc_stops": sc_stops,
+                "green_stops": len(green_pits),
+                "sc_stops": len(sc_pits),
+                "winner_pit": self.pit_laps(strategy)[0] if len(strategy) > 1 else None,
+                "plan_pit": self.pit_laps(plan)[0],
+                "raced_pit": sc_pits[0] if sc_pits else None,
             })
         return pl.DataFrame(rows).with_columns(
             green_same_stops=pl.col("green_stops") == pl.col("winner_stops"),

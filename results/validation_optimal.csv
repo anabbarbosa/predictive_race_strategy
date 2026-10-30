@@ -1,15 +1,15 @@
 circuit_short_name,group,winner_strategy,optimal_strategy,same_stops,same_compounds,optimal_pit_lap_same_compounds,winner_pit_in_window,predicted_gain_s
-Shanghai,Safety Car,MEDIUM 10 -> HARD 46,MEDIUM 33 -> HARD 23,true,true,33,false,3.459
-Suzuka,Safety Car,MEDIUM 22 -> HARD 31,SOFT 30 -> HARD 23,true,false,30,true,1.147
-Miami,Safety Car,MEDIUM 26 -> HARD 31,SOFT 30 -> HARD 27,true,false,33,true,0.910
-Montreal,Wet,SOFT 30 -> MEDIUM 38,MEDIUM 47 -> HARD 21,true,false,22,true,1.441
-Monte Carlo,Suspended,MEDIUM 36 -> HARD 24 -> SOFT 5 -> SOFT 2 -> SOFT 11,HARD 55 -> SOFT 23,false,false,,false,46.755
-Catalunya,VSC only,SOFT 11 -> HARD 16 -> MEDIUM 14 -> HARD 25,MEDIUM 44 -> SOFT 22,false,false,,false,28.480
-Spielberg,VSC only,MEDIUM 19 -> HARD 24 -> HARD 28,MEDIUM 47 -> SOFT 24,false,false,,false,8.087
-Silverstone,Safety Car,MEDIUM 25 -> HARD 23 -> SOFT 4,SOFT 29 -> HARD 23,false,false,,false,23.305
-Spa-Francorchamps,Safety Car,MEDIUM 18 -> HARD 26 -> SOFT 1,SOFT 24 -> HARD 21,false,false,,false,20.183
-Zandvoort,Suspended,MEDIUM 2 -> SOFT 19 -> HARD 26 -> HARD 25,MEDIUM 47 -> SOFT 25,false,false,,false,28.835
-Monza,Suspended,HARD 3 -> MEDIUM 25 -> MEDIUM 25,SOFT 30 -> HARD 23,false,false,,false,25.162
-Madring,VSC only,MEDIUM 14 -> HARD 43,SOFT 30 -> HARD 27,true,false,32,false,5.673
-Baku,Safety Car,MEDIUM 31 -> SOFT 5 -> SOFT 15,SOFT 28 -> HARD 23,false,false,,false,18.841
-Singapore,VSC only,SOFT 32 -> MEDIUM 30,MEDIUM 36 -> SOFT 26,true,false,30,false,0.057
+Shanghai,Safety Car,MEDIUM 10 -> HARD 46,MEDIUM 33 -> HARD 23,true,true,33,false,3.186
+Suzuka,Safety Car,MEDIUM 22 -> HARD 31,SOFT 29 -> HARD 24,true,false,28,true,0.884
+Miami,Safety Car,MEDIUM 26 -> HARD 31,SOFT 30 -> HARD 27,true,false,33,true,0.505
+Montreal,Wet,SOFT 30 -> MEDIUM 38,MEDIUM 47 -> SOFT 21,true,false,23,true,1.331
+Monte Carlo,Suspended,MEDIUM 36 -> HARD 24 -> SOFT 5 -> SOFT 2 -> SOFT 11,HARD 55 -> MEDIUM 23,false,false,,false,45.917
+Catalunya,VSC only,SOFT 11 -> HARD 16 -> MEDIUM 14 -> HARD 25,MEDIUM 44 -> SOFT 22,false,false,,false,27.701
+Spielberg,VSC only,MEDIUM 19 -> HARD 24 -> HARD 28,MEDIUM 47 -> SOFT 24,false,false,,false,7.637
+Silverstone,Safety Car,MEDIUM 25 -> HARD 23 -> SOFT 4,SOFT 28 -> HARD 24,false,false,,false,23.066
+Spa-Francorchamps,Safety Car,MEDIUM 18 -> HARD 26 -> SOFT 1,SOFT 23 -> HARD 22,false,false,,false,19.897
+Zandvoort,Suspended,MEDIUM 2 -> SOFT 19 -> HARD 26 -> HARD 25,MEDIUM 47 -> SOFT 25,false,false,,false,27.982
+Monza,Suspended,HARD 3 -> MEDIUM 25 -> MEDIUM 25,SOFT 30 -> HARD 23,false,false,,false,25.975
+Madring,VSC only,MEDIUM 14 -> HARD 43,SOFT 30 -> MEDIUM 27,true,false,32,false,6.752
+Baku,Safety Car,MEDIUM 31 -> SOFT 5 -> SOFT 15,SOFT 27 -> HARD 24,false,false,,false,18.915
+Singapore,VSC only,SOFT 32 -> MEDIUM 30,MEDIUM 36 -> SOFT 26,true,false,30,false,0.167

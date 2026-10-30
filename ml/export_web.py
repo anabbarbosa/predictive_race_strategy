@@ -180,6 +180,7 @@ class MLExportWeb(MLModels):
                 "circuit_short_name", "group", "position", "driver_number", "team_name", "strategy", "actual_gap",
                 "predicted_gap", "error"), 2),
             "optimal": rows(pl.read_csv(RESULTS_DIR / "validation_optimal.csv"), 2),
+            "safety_car": rows(pl.read_csv(RESULTS_DIR / "validation_safety_car.csv"), 2),
         }
 
     def dataset(self) -> dict:
