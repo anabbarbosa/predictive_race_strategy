@@ -70,7 +70,7 @@ class MLExportWeb(MLModels):
 
     def explain(self, test_year: int) -> dict:
         explain = MLExplain()
-        model = explain.load_model()
+        model = explain.load_model(lap_model="xgboost")
         x, _ = explain.build_features(explain.load_laps(), test_year)
         sample = x.filter(pl.col("year") >= test_year).select(explain.columns).sample(SHAP_POINTS, seed=42)
         explanation = explain.shap_values(model, sample)
@@ -84,7 +84,7 @@ class MLExportWeb(MLModels):
 
     def degradation(self, laps_df, x, test_year: int) -> dict:
         tuning = MLTuning()
-        model = MLSimulate().load_model()
+        model = MLSimulate().load_model(lap_model="xgboost")
         x_train = x.filter(pl.col("year") < test_year)
         grid = tuning.degradation_grid(x.columns, lap_number=40, track_temperature=x_train["track_temperature"].median(),
                                        year=test_year - 1, team="McLaren",

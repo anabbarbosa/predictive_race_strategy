@@ -4,24 +4,29 @@ import matplotlib.pyplot as plt
 import numpy as np
 import polars as pl
 
+from ml.features import COMPOUND_ORDER
 from ml.pit_loss import MLPitLoss
 from ml.simulate import MIN_STINT, MLSimulate, Strategy
 
 N_SIMS = 1000
 TOP_STRATEGIES = 20
 PRIOR_RACES = 3
+MAX_EXTRA_STOPS = 2
+COMPOUNDS = list(COMPOUND_ORDER)
 
 
 class MLSafetyCar(MLSimulate):
-    def neutral_periods(self) -> pl.DataFrame:
-        return self.fetch_data("""
+    def neutral_periods(self, before_year: int = 9999) -> pl.DataFrame:
+        return self.fetch_data(f"""
             SELECT p.*, p.end_lap - p.start_lap + 1 AS n_laps
             FROM safety_car_periods p
-            WHERE p.session_key NOT IN (SELECT session_key FROM results WHERE suspended)
+            WHERE p.session_key NOT IN (SELECT session_key FROM results WHERE suspended) AND p.year < {before_year}
         """)
 
-    def deployment_rates(self, periods: pl.DataFrame, circuit: str) -> dict[str, float]:
-        races = self.fetch_data("SELECT DISTINCT session_key, circuit_short_name FROM results WHERE NOT suspended")
+    def deployment_rates(self, periods: pl.DataFrame, circuit: str, before_year: int = 9999) -> dict[str, float]:
+        races = self.fetch_data(f"""
+            SELECT DISTINCT session_key, circuit_short_name FROM results WHERE NOT suspended AND year < {before_year}
+        """)
         rates = {}
         for sc_type in ("SC", "VSC"):
             counts = races.join(
@@ -85,21 +90,75 @@ class MLSafetyCar(MLSimulate):
                 events.append((sc_type, start, min(total_laps, start + row["n_laps"] - 1)))
         return sorted(events, key=lambda event: event[1])
 
-    def react(self, pit_laps: list[int], compounds: list[str], events: list[tuple[str, int, int]],
-              total_laps: int, limits: dict[str, int]) -> tuple[list[int], list[str]]:
-        pit_laps = list(pit_laps)
-        for _, start, end in events:
+    def stint_table(self, grid: np.ndarray) -> np.ndarray:
+        n_compounds, total_laps, _ = grid.shape
+        cum = np.zeros((n_compounds, total_laps + 1, total_laps + 1))
+        for start in range(total_laps):
+            k = np.arange(total_laps - start)
+            cum[:, start, 1:total_laps - start + 1] = np.cumsum(grid[:, k, start + k], axis=1)
+        return cum
+
+    def replan(self, cum: np.ndarray, lap: int, cheap_until: int, cheap: float, green: float, current: int,
+               stint_start: int, used: frozenset, total_laps: int, limits: dict[str, int]) -> tuple[list[int], list[int]]:
+        key = (lap, cheap_until, cheap, current, stint_start, used)
+        if key in self._plans:
+            return self._plans[key]
+        n = total_laps
+        limit = np.array([limits.get(c, n) for c in COMPOUNDS])
+        pits = np.arange(lap, n)
+        cost = np.where(pits <= cheap_until, cheap, green)
+        # the current stint may already be past its limit when the Safety Car comes out: it can still stop now
+        current_ok = pits - stint_start <= max(limit[current], lap - stint_start)
+        cont = cum[current, stint_start, pits - stint_start]
+
+        options = []
+        if n - stint_start <= limit[current] and len(used) >= 2:
+            options.append((cum[current, stint_start, n - stint_start], [], []))
+        for c1 in range(len(COMPOUNDS)):
+            if len(used | {c1}) >= 2:
+                last = n - pits
+                t = cont + cum[c1, pits, last] + cost
+                t[~(current_ok & (last >= MIN_STINT) & (last <= limit[c1]))] = np.inf
+                i = int(np.argmin(t))
+                options.append((t[i], [int(pits[i])], [c1]))
+            if MAX_EXTRA_STOPS < 2:
+                continue
+            for c2 in range(len(COMPOUNDS)):
+                if len(used | {c1, c2}) < 2:
+                    continue
+                p1, p2 = pits[:, None], pits[None, :]
+                mid, last = p2 - p1, n - p2
+                t = (cont[:, None] + cum[c1, p1, np.clip(mid, 0, n)] + cum[c2, p2, last]
+                     + cost[:, None] + cost[None, :])
+                ok = (current_ok[:, None] & (mid >= MIN_STINT) & (mid <= limit[c1])
+                      & (last >= MIN_STINT) & (last <= limit[c2]))
+                t = np.where(ok, t, np.inf)
+                i, j = np.unravel_index(int(np.argmin(t)), t.shape)
+                options.append((t[i, j], [int(pits[i]), int(pits[j])], [c1, c2]))
+        _, pit_laps, compounds = min(options, key=lambda option: option[0])
+        self._plans[key] = (pit_laps, compounds)
+        return pit_laps, compounds
+
+    def play(self, strategy: Strategy, events: list[tuple[str, int, int]], cum: np.ndarray, total_laps: int,
+             pit_loss: float, ratios: dict[str, float], limits: dict[str, int]) -> tuple[float, list[int], list[int], bool]:
+        pit_laps = self.pit_laps(strategy)
+        compounds = [COMPOUNDS.index(c) for c, _ in strategy]
+        windows = []
+        for sc_type, start, end in events:
+            if end <= start:
+                continue
+            cheap = pit_loss * ratios.get(sc_type, 1.0)
+            windows.append((start, end - 1, cheap))
             done = [lap for lap in pit_laps if lap < start]
-            upcoming = [i for i, lap in enumerate(pit_laps) if lap >= start]
-            if end <= start or not upcoming or pit_laps[upcoming[0]] <= end - 1:
-                continue 
-            i = upcoming[0]
-            previous = done[-1] if done else 0
-            following = pit_laps[i + 1] if i + 1 < len(pit_laps) else total_laps
-            if start - previous >= MIN_STINT and following - start <= limits.get(compounds[i + 1], total_laps):
-                pit_laps[i] = start
-        under = [next((t for t, s, e in events if s <= lap <= e - 1), "") for lap in pit_laps]
-        return pit_laps, under
+            stint = len(done)
+            rest_laps, rest_compounds = self.replan(
+                cum, start, end - 1, cheap, pit_loss, compounds[stint], done[-1] if done else 0,
+                frozenset(compounds[:stint + 1]), total_laps, limits)
+            pit_laps, compounds = done + rest_laps, compounds[:stint + 1] + rest_compounds
+        costs = [min((c for first, last, c in windows if first <= lap <= last), default=pit_loss) for lap in pit_laps]
+        bounds = [0, *pit_laps, total_laps]
+        laps = sum(cum[c, a, b - a] for c, a, b in zip(compounds, bounds, bounds[1:]))
+        return float(laps + sum(costs)), pit_laps, compounds, any(c < pit_loss for c in costs)
 
     def candidates(self, results: pl.DataFrame) -> pl.DataFrame:
         best_per_plan = results.group_by("compounds", "n_stops").agg(pl.all().sort_by("total_time").first())
@@ -110,16 +169,15 @@ class MLSafetyCar(MLSimulate):
                     limits: dict[str, int], n_sims: int, seed: int = 42) -> pl.DataFrame:
         rng = np.random.default_rng(seed)
         races = [self.sample_neutral_laps(rng, periods, rates, total_laps) for _ in range(n_sims)]
+        cum, self._plans = self.stint_table(grid), {}
         rows = []
         for strategy_id in candidates["strategy_id"]:
             strategy = strategies[strategy_id]
-            compounds = [compound for compound, _ in strategy]
             for sim, events in enumerate(races):
-                pit_laps, under = self.react(self.pit_laps(strategy), compounds, events, total_laps, limits)
-                costs = [pit_loss * ratios.get(sc_type, 1.0) for sc_type in under]
-                rows.append((strategy_id, sim, self.race_time(grid, compounds, pit_laps, total_laps, costs),
-                             any(under), len(events) > 0))
-        sims = pl.DataFrame(rows, schema=["strategy_id", "sim", "total_time", "cheap_stop", "neutralised"], orient="row")
+                total, pit_laps, _, cheap_stop = self.play(strategy, events, cum, total_laps, pit_loss, ratios, limits)
+                rows.append((strategy_id, sim, total, len(pit_laps), cheap_stop, len(events) > 0))
+        sims = pl.DataFrame(rows, schema=["strategy_id", "sim", "total_time", "stops", "cheap_stop", "neutralised"],
+                            orient="row")
         return sims.with_columns(gap=pl.col("total_time") - pl.col("total_time").min().over("sim"))
 
     def summarise(self, sims: pl.DataFrame, candidates: pl.DataFrame, strategies: list[Strategy]) -> pl.DataFrame:
@@ -134,6 +192,7 @@ class MLSafetyCar(MLSimulate):
                 p90_regret_s=pl.col("gap").quantile(0.9),
                 win_pct=pl.col("win").mean() * 100,
                 cheap_stop_pct=pl.col("cheap_stop").mean() * 100,
+                mean_stops=pl.col("stops").mean(),
             )
             .join(candidates.select("strategy_id", "n_stops", "total_time"), on="strategy_id")
             .with_columns(
@@ -142,7 +201,7 @@ class MLSafetyCar(MLSimulate):
                 expected_gap_s=pl.col("expected_s") - pl.col("expected_s").min(),
             )
             .select("strategy", "n_stops", "green_gap_s", "expected_gap_s", "mean_regret_s", "p90_regret_s",
-                    "win_pct", "cheap_stop_pct", "strategy_id")
+                    "win_pct", "cheap_stop_pct", "mean_stops", "strategy_id")
             .sort("expected_gap_s")
         )
 

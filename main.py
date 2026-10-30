@@ -3,7 +3,9 @@ import click
 from etl.controller import ETLController
 from ml.analytics import save_results
 from ml.baseline import MLbaseline
+import ml.simulate
 from ml.controller import MLController
+from ml.degradation import MLDegradation
 from ml.explain import MLExplain
 from ml.export_web import MLExportWeb
 from ml.features import MLfeatures
@@ -38,6 +40,7 @@ def parse_compounds(ctx, param, value):
 
 @click.command()
 @click.option("--download", type=click.BOOL, default=False, help="Download raw data from the OpenF1 API into etl/data/raw/.")
+@click.option("--download-practice", type=click.BOOL, default=False, help="Download the laps and stints of the practice sessions of every race weekend into etl/data/raw/.")
 @click.option("--process", type=click.BOOL, default=False, help="Parse raw data and write the lap, stint, pit stop and result tables to etl/data/output_data/.")
 @click.option("--merge", type=click.BOOL, default=False, help="Read the parquet and merge it into Postgres.")
 @click.option("--plot", type=click.BOOL, default=False, help="Save the plots to plots/ and their results as a new run in the analytics_* tables.")
@@ -45,6 +48,7 @@ def parse_compounds(ctx, param, value):
 @click.option("--baseline", type=click.BOOL, default=False, help="Evaluate the baseline models (global mean, mean per compound) on the test season.")
 @click.option("--models", type=click.BOOL, default=False, help="Train Random Forest and XGBoost, compare them with the baselines and save the evaluation plots to plots/.")
 @click.option("--tune", type=click.BOOL, default=False, help="Tune Random Forest and XGBoost with race-grouped CV, plot feature importance and degradation curves, and save the models to ml/trained/.")
+@click.option("--degradation", type=click.BOOL, default=False, help="Fit the degradation model (compound offsets, curvature and each weekend's tyre slope from its practice long runs) and save it to ml/trained/.")
 @click.option("--pitstops", type=click.BOOL, default=False, help="Compare the two pit loss estimates per circuit and save plots/pit_loss.png.")
 @click.option("--simulate", type=click.BOOL, default=False, help="Search every 1- and 2-stop strategy for a circuit and team (or predict one --strategy) with the tuned monotone XGBoost from ml/trained/.")
 @click.option("--validate", type=click.BOOL, default=False, help="Simulate the real strategies of the top finishers in the test season, compare with their race times and with the optimal strategy, and save the tables to results/.")
@@ -53,6 +57,7 @@ def parse_compounds(ctx, param, value):
 @click.option("--undercut", type=click.BOOL, default=False, help="Seconds gained by pitting before the car in front, for every pit lap and wait, and save plots/undercut.png.")
 @click.option("--traffic", type=click.BOOL, default=False, help="Rank the best strategies again racing the field of the latest race at the circuit, with dirty air and overtaking, and save plots/traffic.png.")
 @click.option("--web", type=click.BOOL, default=False, help="Export the model comparisons and simulation results to web/data.js for the web page (web/index.html).")
+@click.option("--lap-model", type=click.Choice(["xgboost", "degradation"]), default="xgboost", show_default=True, help="Lap-time model of the race simulator (with --simulate, --validate, --safety-car, --undercut, --traffic, --web).")
 @click.option("--circuit", help="Circuit short name as in the laps table, e.g. Spielberg (with --simulate, --safety-car, --undercut, --traffic).")
 @click.option("--team", help="Team name as in the laps table, e.g. McLaren (with --simulate, --safety-car, --undercut, --traffic).")
 @click.option("--strategy", callback=parse_strategy, help="Predict only this strategy, as COMPOUND:LAPS, e.g. MEDIUM:18,HARD:39 (with --simulate).")
@@ -67,14 +72,15 @@ def parse_compounds(ctx, param, value):
 @click.option("--n-iter", default=20, show_default=True, help="Hyperparameter combinations tried per model when tuning.")
 @click.option("--test-year", default=2026, show_default=True, help="Season used as the test set; earlier seasons are the training set.")
 @click.option("--label", default=None, help="Label for the analytics run, e.g. 'before 1-stop strategy'.")
-def main(download, process, merge, plot, features, baseline, models, tune, pitstops, simulate, validate, shap, safety_car,
-         undercut, traffic, web, circuit, team, strategy, max_stops, total_laps, track_temp, pit_loss, session_key, driver,
+def main(download, download_practice, process, merge, plot, features, baseline, models, tune, degradation, pitstops, simulate, validate, shap,
+         safety_car, undercut, traffic, web, lap_model, circuit, team, strategy, max_stops, total_laps, track_temp, pit_loss, session_key, driver,
          n_sims, compounds, n_iter, test_year, label):
     race_steps = {"--simulate": simulate, "--safety-car": safety_car, "--undercut": undercut, "--traffic": traffic}
-    if not (download or process or merge or plot or features or baseline or models or tune or pitstops or validate
+    if not (download or download_practice or process or merge or plot or features or baseline or models or tune or degradation
+            or pitstops or validate
             or shap or web or any(race_steps.values())):
-        raise click.UsageError("Choose at least one step: --download 1, --process 1, --merge 1, --plot 1, --features 1, "
-                               "--baseline 1, --models 1, --tune 1, --pitstops 1, --simulate 1, --validate 1, --shap 1, "
+        raise click.UsageError("Choose at least one step: --download 1, --download-practice 1, --process 1, --merge 1, --plot 1, --features 1, "
+                               "--baseline 1, --models 1, --tune 1, --degradation 1, --pitstops 1, --simulate 1, --validate 1, --shap 1, "
                                "--safety-car 1, --undercut 1, --traffic 1 or --web 1.")
     if any(race_steps.values()):
         # click has no "required only when another flag is on", so check it here before any step runs
@@ -88,6 +94,8 @@ def main(download, process, merge, plot, features, baseline, models, tune, pitst
     etl = ETLController()
     if download:
         etl.extract()
+    if download_practice:
+        etl.extract_practice()
     if process:
         etl.transform()
     if merge:
@@ -114,6 +122,11 @@ def main(download, process, merge, plot, features, baseline, models, tune, pitst
 
     if tune:
         MLTuning().run(test_year, n_iter)
+
+    if degradation:
+        MLDegradation().run(test_year)
+
+    ml.simulate.LAP_MODEL = lap_model
 
     if pitstops:
         MLPitLoss().run()
