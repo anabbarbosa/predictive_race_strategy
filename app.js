@@ -287,13 +287,13 @@ function overview() {
   const vsc = DATA.validation.summary.find((g) => g.group === "VSC only");
   const oneStop = DATA.strategies.filter((c) => c.best_2_stop_gap > 0).length;
   document.getElementById("overview-intro").textContent =
-    `${d.races} races and ${thousands(d.clean_laps)} clean laps from OpenF1. Trained on 2024–2025, tested on ${DATA.test_year}.`;
+    `${d.races} races · ${thousands(d.clean_laps)} clean laps · test season ${DATA.test_year}`;
   stats(document.getElementById("overview-stats"), [
     { label: "Lap-time error of the simulator's model", value: `${fmt(best.mae, 3)} s`, hero: true,
       note: `${fmt((1 - best.mae / baseline) * 100, 0)}% better than the best baseline (${fmt(baseline, 3)} s)`, noteClass: "delta-good" },
     { label: "Gap between top-5 drivers, VSC-only races", value: `±${fmt(vsc.gap_mae_s, 1)} s`, note: "over a whole race (mean absolute error)" },
     { label: "Finishing order, VSC-only races", value: fmt(vsc.spearman, 2), note: "Spearman correlation, predicted vs real" },
-    { label: "Circuits where 1 stop beats 2", value: `${oneStop}/${DATA.strategies.length}`, note: "the model sees too little degradation for a 2nd stop" },
+    { label: "Circuits where 1 stop beats 2", value: `${oneStop}/${DATA.strategies.length}`, note: "green-flag race" },
   ]);
 }
 
@@ -461,9 +461,9 @@ function validation() {
   const vsc = v.summary.find((g) => g.group === "VSC only");
   stats(document.getElementById("validation-stats"), [
     { label: "Drivers simulated", value: String(v.summary.reduce((a, g) => a + g.drivers, 0)), note: `${v.summary.reduce((a, g) => a + g.races, 0)} races of ${DATA.test_year}` },
-    { label: "Race time error, VSC-only races", value: `${fmt(vsc.mae_pct, 1)}%`, note: `${fmt(vsc.mae_s, 0)} s, always too fast: neutralised laps are missing` },
+    { label: "Race time error, VSC-only races", value: `${fmt(vsc.mae_pct, 1)}%`, note: `${fmt(vsc.mae_s, 0)} s` },
     { label: "Same number of stops as the winner", value: `${opt.filter((r) => r.same_stops).length}/${opt.length}` },
-    { label: "Same compounds as the winner", value: `${opt.filter((r) => r.same_compounds).length}/${opt.length}`, note: "the model can't tell compounds apart" },
+    { label: "Same compounds as the winner", value: `${opt.filter((r) => r.same_compounds).length}/${opt.length}` },
   ]);
   const hidden = new Set();
   const draw = () => {
@@ -497,9 +497,8 @@ function safetyCar() {
   const sc = DATA.safety_car;
   const ratio = (t) => sc.neutral_pit_loss.find((r) => r.sc_type === t);
   document.getElementById("sc-intro").textContent =
-    `${DATA.example.circuit}, ${DATA.example.team}: the best strategies run through the same ${thousands(sc.n_sims)} random races, ` +
-    `with Safety Cars and VSCs drawn from the circuit's history. A stop under a neutralisation is cheaper, and the car brings its stop ` +
-    `forward when one comes.`;
+    `${DATA.example.circuit}, ${DATA.example.team}: ${thousands(sc.n_sims)} random races with the circuit's Safety Cars and VSCs, ` +
+    `re-planning the rest of the race at each one.`;
   stats(document.getElementById("sc-stats"), [
     { label: "Expected per race", value: `${fmt(sc.rates.SC, 2)} SC · ${fmt(sc.rates.VSC, 2)} VSC`, note: `${fmt(sc.neutralised_pct, 0)}% of random races neutralised` },
     { label: "Stop under Safety Car", value: `${fmt(ratio("SC").neutral_loss, 1)} s`, note: `${fmt(ratio("SC").ratio * 100, 0)}% of a green-flag stop (${ratio("SC").n_stops} stops)` },
@@ -543,6 +542,22 @@ function safetyCar() {
     { key: "p90_regret_s", label: "p90 regret", num: true, format: (x) => fmt(x) },
     { key: "win_pct", label: "Win %", num: true, format: (x) => fmt(x, 1) },
   ], sc.summary.slice(0, 8), { open: true, highlight: (r) => r.expected_gap_s === 0 });
+
+  const replay = DATA.validation.safety_car;
+  const median = (xs) => { const v = [...xs].sort((a, b) => a - b); return v.length ? v[Math.floor(v.length / 2)] : NaN; };
+  const oneStop = replay.filter((r) => r.winner_stops === 1);
+  const planError = median(oneStop.map((r) => Math.abs(r.plan_pit - r.winner_pit)));
+  const racedError = median(oneStop.filter((r) => r.raced_pit !== null).map((r) => Math.abs(r.raced_pit - r.winner_pit)));
+  stats(document.getElementById("replay-stats"), [
+    { label: "First stop vs 1-stop winners", value: `±${racedError} laps`, note: `±${planError} laps without re-planning`, noteClass: "delta-good" },
+    { label: "Same number of stops as the winner", value: `${replay.filter((r) => r.sc_same_stops).length}/${replay.length}` },
+  ]);
+  table(document.getElementById("replay-table"), [
+    { key: "circuit_short_name", label: "Race" }, { key: "neutralisations", label: "SC / VSC laps" },
+    { key: "winner_strategy", label: "Winner" }, { key: "plan", label: "Plan" },
+    { key: "sc_plan_raced", label: "Raced" },
+    { key: "sc_same_stops", label: "Same stops", format: (x) => (x ? "✓ yes" : "– no") },
+  ], replay, { open: true });
 }
 
 function mix(a, b, t) {
@@ -556,8 +571,8 @@ function undercut() {
   const oneLap = u.cells.filter((c) => c.laps_later === 1).map((c) => c.gain_s).sort((a, b) => a - b);
   const median = oneLap[Math.floor(oneLap.length / 2)];
   document.getElementById("undercut-intro").textContent =
-    `Two identical ${DATA.example.team} cars at ${DATA.example.circuit}, both ${u.old} → ${u.new}. Car A pits first; car B stays out ` +
-    `1–10 laps longer. Pitting one lap earlier gains about ${fmt(median, 2)} s, so the undercut works from up to ~${fmt(Math.max(...oneLap), 1)} s behind.`;
+    `${DATA.example.circuit}, ${u.old} → ${u.new}: pitting one lap earlier gains ~${fmt(median, 2)} s; ` +
+    `the undercut works from up to ~${fmt(Math.max(...oneLap), 1)} s behind.`;
   const draw = () => {
     const el = document.getElementById("undercut-chart");
     const laps = [...new Set(u.cells.map((c) => c.pit_lap))].sort((a, b) => a - b);
@@ -603,12 +618,10 @@ function traffic() {
   const real = t.ranking.find((r) => r.strategy.endsWith("(real)"));
   const freeBest = t.ranking.find((r) => r.free_rank === 1);
   document.getElementById("traffic-intro").textContent =
-    `Our ${DATA.example.team} car races the cars on the lead lap of the latest ${DATA.example.circuit} race, each on its real strategy and ` +
-    `own pace. Close behind a car it loses the dirty-air penalty and only passes if it is 0.7 s a lap faster.`;
+    `${DATA.example.team} against the latest ${DATA.example.circuit} field on their real strategies.`;
   document.getElementById("traffic-callout").textContent =
     `With traffic, the strategy actually raced (${real.strategy.replace(" (real)", "")}) comes out ${fmt(freeBest.traffic_time - real.traffic_time, 1)} s ahead ` +
-    `of the green-flag optimum (${freeBest.strategy}), which spends ${freeBest.laps_held} laps stuck behind another car and loses ` +
-    `${fmt(freeBest.traffic_loss_s, 1)} s. Caveat: the real early stops were made under a Safety Car; here everyone pays the full pit loss.`;
+    `of the green-flag optimum (${freeBest.strategy}), which loses ${fmt(freeBest.traffic_loss_s, 1)} s in ${freeBest.laps_held} laps of traffic.`;
   renders.push(() => barChart(document.getElementById("dirty-chart"), t.dirty_air.filter((r) => r.penalty_s > 0).map((r) => ({
     label: `${r.gap_bin} s behind`, value: r.penalty_s, color: css("--series-2"),
     tip: [{ value: `${fmt(r.penalty_s, 3)} s`, name: "lost per lap" }, { value: thousands(r.n_laps), name: "laps measured" }],
@@ -705,7 +718,7 @@ if (!DATA) {
   undercut();
   traffic();
   document.getElementById("footer").textContent =
-    `Data: OpenF1 (openf1.org). Generated ${DATA.generated} by python main.py --web 1. Model: tuned monotone XGBoost.`;
+    `Updated on ${DATA.generated} · Data: OpenF1`;
   setupTheme();
   setupNav();
   renderAll();
